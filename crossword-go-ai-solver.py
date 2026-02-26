@@ -1,0 +1,433 @@
+#!/usr/bin/env python3
+import argparse
+import curses
+import json
+import re
+import sys
+from typing import Dict, List
+
+ROWS = 10
+COLS = 8
+COL_LABELS = "ABCDEFGH"
+
+CTRL_W = 23  # save
+CTRL_X = 24  # quit
+CTRL_R = 18  # rack edit
+
+SOLUTION_RE = re.compile(r'(^|\s)s=([A-Za-z]+)\b')
+
+
+# --------------------------------------------------
+# Helpers
+# --------------------------------------------------
+
+def cell_label(r: int, c: int) -> str:
+    return f"{COL_LABELS[c]}{r+1}"
+
+def make_initial_grid() -> List[List[str]]:
+    g = [["." for _ in range(COLS)] for _ in range(ROWS)]
+    g[0][0] = "X"
+    for c in range(1, COLS):
+        g[0][c] = "#"
+    for r in range(1, ROWS):
+        g[r][0] = "#"
+    return g
+
+def is_interior(r: int, c: int) -> bool:
+    return r >= 1 and c >= 1
+
+def fixed_dirs_for_cell(r: int, c: int) -> List[str]:
+    if r == 0 and c >= 1:
+        return ["S"]
+    if c == 0 and r >= 1:
+        return ["E"]
+    return []
+
+def normalize_grid_token(tok: str) -> str:
+    s = str(tok).strip().upper()
+    if not s:
+        return "."
+    if len(s) != 1:
+        raise ValueError(f"Invalid token {tok}")
+    if s == "3":
+        return "#"
+    if s in {".", "#", "X"}:
+        return s
+    if "A" <= s <= "Z":
+        return s
+    raise ValueError(f"Invalid token {tok}")
+
+def normalize_rack(raw: str) -> List[str]:
+    s = raw.strip().upper()
+    letters = [ch for ch in s if "A" <= ch <= "Z"]
+    return letters[:5]
+
+def grid_to_pretty_text(grid):
+    lines = ["     " + " ".join(COL_LABELS)]
+    for r in range(ROWS):
+        lines.append(f"{r+1:>3}  " + " ".join(grid[r]))
+    return "\n".join(lines)
+
+def format_clue_preview(items: List[dict]) -> str:
+    """
+    items is the per-cell clues list in JSON form:
+      [{"dir":"E","text":"...","solution":"..."}, ...]
+    Returns a compact string for the header.
+    """
+    if not items:
+        return ""
+    e = next((it for it in items if str(it.get("dir","")).upper() == "E"), None)
+    s = next((it for it in items if str(it.get("dir","")).upper() == "S"), None)
+
+    def fmt(it):
+        if not it:
+            return ""
+        text = str(it.get("text", "")).strip()
+        sol = it.get("solution")
+        sol = str(sol).strip().upper() if sol else ""
+        if sol:
+            return f"{text} (s={sol})" if text else f"(s={sol})"
+        return text
+
+    parts = []
+    if e:
+        parts.append("E: " + fmt(e))
+    if s:
+        parts.append("S: " + fmt(s))
+    return " | ".join(parts)
+
+
+# --------------------------------------------------
+# JSON load/save
+# --------------------------------------------------
+
+def load_state(path: str):
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def validate_and_normalize_state(state):
+    grid_raw = state.get("grid")
+    if grid_raw is None:
+        grid = make_initial_grid()
+    else:
+        grid = []
+        if not (isinstance(grid_raw, list) and len(grid_raw) == ROWS):
+            raise ValueError("grid must be 10 rows.")
+        for row in grid_raw:
+            if not (isinstance(row, list) and len(row) == COLS):
+                raise ValueError("each grid row must be length 8.")
+            grid.append([normalize_grid_token(x) for x in row])
+
+    # enforce fixed layout
+    grid[0][0] = "X"
+    for c in range(1, COLS):
+        grid[0][c] = "#"
+    for r in range(1, ROWS):
+        grid[r][0] = "#"
+
+    clue_map = {}
+    for entry in state.get("clues", []):
+        cell = entry.get("cell")
+        if not cell:
+            continue
+        clue_map[str(cell).strip().upper()] = entry.get("clues", [])
+
+    rack_raw = state.get("rack", [])
+    rack = []
+    if isinstance(rack_raw, list):
+        for x in rack_raw:
+            sx = str(x).strip().upper()
+            if len(sx) == 1 and "A" <= sx <= "Z":
+                rack.append(sx)
+    rack = rack[:5]
+
+    return grid, clue_map, rack
+
+def build_state_json(grid, clue_map, rack):
+    def key_fn(cell):
+        col = COL_LABELS.index(cell[0])
+        row = int(cell[1:]) - 1
+        return (row, col)
+
+    clues = [{"cell": c, "clues": clue_map[c]}
+             for c in sorted(clue_map.keys(), key=key_fn)]
+
+    return {
+        "size": {"cols": COLS, "rows": ROWS},
+        "rack": rack,
+        "grid": grid,
+        "clues": clues
+    }
+
+
+# --------------------------------------------------
+# Clue parsing (text; split E/S; optional s=WORD)
+# --------------------------------------------------
+
+def extract_solution_and_clean_text(raw):
+    s = raw.strip()
+    sol = None
+    m = SOLUTION_RE.search(s)
+    if m:
+        sol = m.group(2).upper()
+        s = (s[:m.start()] + " " + s[m.end():]).strip()
+        s = re.sub(r"\s+", " ", s)
+    return s, sol
+
+def parse_clue_entry(raw, fixed_dirs):
+    s = raw.strip()
+    if not s:
+        raise ValueError("Empty clue")
+
+    if "/" in s:
+        parts = s.split("/")
+        if len(parts) != 2:
+            raise ValueError("Only one '/' allowed")
+        e_seg, s_seg = parts[0].strip(), parts[1].strip()
+    else:
+        e_seg, s_seg = s, ""
+
+    e_text, e_sol = extract_solution_and_clean_text(e_seg) if e_seg else ("", None)
+    s_text, s_sol = extract_solution_and_clean_text(s_seg) if s_seg else ("", None)
+
+    out = []
+
+    def add(d, t, sol):
+        item = {"dir": d, "text": t}
+        if sol:
+            item["solution"] = sol
+        out.append(item)
+
+    if fixed_dirs == ["E"]:
+        add("E", e_text or s_text, e_sol or s_sol)
+        return out
+
+    if fixed_dirs == ["S"]:
+        add("S", s_text or e_text, s_sol or e_sol)
+        return out
+
+    if (e_text or e_sol) and (s_text or s_sol):
+        add("E", e_text, e_sol)
+        add("S", s_text, s_sol)
+    elif e_text or e_sol:
+        add("E", e_text, e_sol)
+    elif s_text or s_sol:
+        add("S", s_text, s_sol)
+    else:
+        raise ValueError("No clue text")
+
+    return out
+
+
+# --------------------------------------------------
+# Editor
+# --------------------------------------------------
+
+def curses_editor(stdscr, grid, clue_map, rack):
+    curses.curs_set(0)
+    stdscr.keypad(True)
+
+    if curses.has_colors():
+        curses.start_color()
+        curses.use_default_colors()
+        curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_YELLOW)  # clue-entered highlight
+        curses.init_pair(2, curses.COLOR_BLACK, curses.COLOR_CYAN)    # cursor highlight
+
+    r, c = 1, 1
+
+    help_lines = [
+        "ARROWS move | A-Z letter | 3=# | SPACE/BKSP=.",
+        "ENTER: '.'->'#'+clue, '#' edit clue | Ctrl-R rack | Ctrl-W save | Ctrl-X quit"
+    ]
+
+    def footer_y():
+        return max(0, curses.LINES - 2)
+
+    def prompt_line(prompt):
+        y = footer_y()
+        stdscr.move(y, 0)
+        stdscr.clrtoeol()
+        stdscr.addstr(y, 0, prompt[:max(0, curses.COLS-1)])
+        stdscr.refresh()
+        curses.echo()
+        try:
+            start_x = min(len(prompt), max(0, curses.COLS-1))
+            s = stdscr.getstr(y, start_x).decode("utf-8", errors="replace")
+        finally:
+            curses.noecho()
+        return s.strip()
+
+    def draw():
+        stdscr.erase()
+        y = 0
+        for line in help_lines:
+            stdscr.addstr(y, 0, line[:max(0, curses.COLS-1)])
+            y += 1
+
+        rack_str = "".join(rack) if rack else "(empty)"
+        stdscr.addstr(y, 0, f"Rack: {rack_str}")
+        y += 1
+
+        cur_cell = cell_label(r, c)
+        stdscr.addstr(y, 0, f"Cursor {cur_cell} '{grid[r][c]}'")
+        y += 1
+
+        preview = format_clue_preview(clue_map.get(cur_cell, []))
+        if preview:
+            stdscr.addstr(y, 0, ("Clue: " + preview)[:max(0, curses.COLS-1)])
+            y += 1
+        else:
+            stdscr.addstr(y, 0, "Clue: (none)"[:max(0, curses.COLS-1)])
+            y += 1
+
+        y += 1  # blank line
+
+        stdscr.addstr(y, 0, "     " + " ".join(COL_LABELS))
+        y += 1
+
+        for rr in range(ROWS):
+            stdscr.addstr(y+rr, 0, f"{rr+1:>3}  ")
+            for cc in range(COLS):
+                ch = grid[rr][cc]
+                cell = cell_label(rr, cc)
+
+                attr = 0
+                if ch == "#" and cell in clue_map and curses.has_colors():
+                    attr |= curses.color_pair(1)
+
+                if rr == r and cc == c:
+                    attr = curses.color_pair(2) if curses.has_colors() else curses.A_REVERSE
+
+                stdscr.addstr(y+rr, 5+2*cc, ch, attr)
+
+        stdscr.refresh()
+
+    def edit_rack():
+        nonlocal rack
+        line = prompt_line("Enter rack letters (e.g. ABCDE or A B C D E), max 5: ")
+        if not line:
+            return
+        rack = normalize_rack(line)
+
+    def enter_clue():
+        nonlocal grid
+        token = grid[r][c]
+        if token not in (".", "#"):
+            return
+
+        if token == ".":
+            if not is_interior(r, c):
+                return
+            grid[r][c] = "#"
+
+        cell = cell_label(r, c)
+        fixed = fixed_dirs_for_cell(r, c)
+
+        existing = ""
+        if cell in clue_map:
+            items = clue_map[cell]
+            def part(it):
+                t = it.get("text", "")
+                sol = it.get("solution")
+                return (t + (f" s={sol}" if sol else "")).strip()
+            e = next((it for it in items if str(it.get("dir","")).upper() == "E"), None)
+            s_ = next((it for it in items if str(it.get("dir","")).upper() == "S"), None)
+            if e and s_:
+                existing = f"{part(e)} / {part(s_)}"
+            elif e:
+                existing = part(e)
+            elif s_:
+                existing = "/" + part(s_)
+
+        line = prompt_line(f"{cell} clue [text, split E/S with '/', optional s=WORD] [{existing}]: ")
+        if not line:
+            return
+
+        try:
+            clue_map[cell] = parse_clue_entry(line, fixed)
+        except Exception:
+            pass
+
+    while True:
+        draw()
+        ch = stdscr.getch()
+
+        if ch == CTRL_X:
+            raise KeyboardInterrupt()
+
+        if ch == CTRL_W:
+            return grid, clue_map, rack
+
+        if ch == CTRL_R:
+            edit_rack()
+            continue
+
+        if ch == curses.KEY_UP:
+            r = max(0, r-1); continue
+        if ch == curses.KEY_DOWN:
+            r = min(ROWS-1, r+1); continue
+        if ch == curses.KEY_LEFT:
+            c = max(0, c-1); continue
+        if ch == curses.KEY_RIGHT:
+            c = min(COLS-1, c+1); continue
+
+        if ch in (10, 13, curses.KEY_ENTER):
+            enter_clue()
+            continue
+
+        if ch == ord(' ') or ch in (127, 8, curses.KEY_BACKSPACE):
+            if is_interior(r, c):
+                grid[r][c] = "."
+            continue
+
+        if 32 <= ch <= 126 and is_interior(r, c):
+            s = chr(ch).upper()
+            if s == "3":
+                grid[r][c] = "#"
+            elif s in {".", "#"} or ("A" <= s <= "Z"):
+                grid[r][c] = s
+
+
+# --------------------------------------------------
+# Main
+# --------------------------------------------------
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("json_path", nargs="?", help="Board state JSON file (read on start, write on save).")
+    args = parser.parse_args()
+
+    if args.json_path:
+        try:
+            state = load_state(args.json_path)
+        except FileNotFoundError:
+            state = {}
+    else:
+        state = {}
+
+    grid, clue_map, rack = validate_and_normalize_state(state)
+
+    try:
+        grid, clue_map, rack = curses.wrapper(
+            lambda stdscr: curses_editor(stdscr, grid, clue_map, rack)
+        )
+    except KeyboardInterrupt:
+        print("\nCancelled.", file=sys.stderr)
+        return
+
+    out_state = build_state_json(grid, clue_map, rack)
+    json_text = json.dumps(out_state, indent=2)
+
+    print("\n--- FINAL GRID ---")
+    print(grid_to_pretty_text(grid))
+    print("\n--- JSON OUTPUT ---")
+    print(json_text)
+
+    if args.json_path:
+        with open(args.json_path, "w", encoding="utf-8") as f:
+            f.write(json_text)
+            f.write("\n")
+        print(f"\nSaved: {args.json_path}", file=sys.stderr)
+
+if __name__ == "__main__":
+    main()
