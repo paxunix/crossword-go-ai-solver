@@ -7,6 +7,8 @@ import sys
 import textwrap
 from typing import Dict, List, Set
 
+from solver_moves import generate_forced_moves
+
 ROWS = 10
 COLS = 8
 COL_LABELS = "ABCDEFGH"
@@ -633,12 +635,41 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("json_path", nargs="?", help="Board state JSON file (read on start, write on save).")
-    args = parser.parse_args()
+    sub = parser.add_subparsers(dest="command")
 
-    if args.json_path:
+    p_edit = sub.add_parser("edit", help="Open curses editor")
+    p_edit.add_argument("json_path", nargs="?", help="Board state JSON file (read on start, write on save).")
+
+    p_suggest = sub.add_parser("suggest", help="Suggest deterministic forced moves")
+    p_suggest.add_argument("json_path", help="Board state JSON file")
+    p_suggest.add_argument("--top", type=int, default=10, help="Number of moves to show")
+
+    # Backward compatibility: if first arg is not a subcommand, treat as legacy edit mode.
+    argv = sys.argv[1:]
+    if argv and argv[0] not in {"edit", "suggest", "-h", "--help"}:
+        args = parser.parse_args(["edit"] + argv)
+    else:
+        args = parser.parse_args()
+
+    if args.command == "suggest":
+        state = load_state(args.json_path)
+        moves = generate_forced_moves(state, top=args.top)
+        print(f"Top {len(moves)} move(s) for {args.json_path}:")
+        for i, mv in enumerate(moves, start=1):
+            if mv.placements:
+                ps = ", ".join(f"{c}={l}" for c, l in mv.placements)
+            else:
+                ps = "(pass)"
+            print(f"{i}. {ps}")
+            print(f"   tile={mv.tile_points} word={mv.word_points} bonus={mv.bonus} total={mv.total}")
+            if mv.completed_slots:
+                print(f"   completed={', '.join(mv.completed_slots)}")
+        return
+
+    json_path = getattr(args, "json_path", None)
+    if json_path:
         try:
-            state = load_state(args.json_path)
+            state = load_state(json_path)
         except FileNotFoundError:
             state = {}
     else:
@@ -662,11 +693,11 @@ def main():
     print("\n--- JSON OUTPUT ---")
     print(json_text)
 
-    if args.json_path:
-        with open(args.json_path, "w", encoding="utf-8") as f:
+    if json_path:
+        with open(json_path, "w", encoding="utf-8") as f:
             f.write(json_text)
             f.write("\n")
-        print(f"\nSaved: {args.json_path}", file=sys.stderr)
+        print(f"\nSaved: {json_path}", file=sys.stderr)
 
 if __name__ == "__main__":
     main()
