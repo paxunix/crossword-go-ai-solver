@@ -16,7 +16,7 @@ CTRL_X = 24  # quit
 CTRL_R = 18  # rack edit
 
 SOLUTION_RE = re.compile(r'(^|\s)s=([A-Za-z]+)\b', re.IGNORECASE)
-UNKNOWN_RE = re.compile(r'(^|\s)!=(.*)$', re.IGNORECASE)
+UNKNOWN_RE = re.compile(r'(^|\s)!=(.*)$')
 
 
 # --------------------------------------------------
@@ -88,11 +88,13 @@ def format_clue_preview(items: List[dict]) -> str:
         sol = it.get("solution")
         sol = str(sol).strip().upper() if sol else ""
         unknown = bool(it.get("unknown"))
+        unknown_hint = str(it.get("unknown_hint", "")).strip()
         tags = []
         if sol:
             tags.append(f"s=({sol})")
         if unknown:
-            tags.append(f"!=({text})")
+            hint = unknown_hint or text
+            tags.append(f"!=({hint})")
 
         if unknown and tags:
             return " ".join(tags)
@@ -160,6 +162,9 @@ def validate_and_normalize_state(state):
                     clue["solution"] = s
             if unknown:
                 clue["unknown"] = True
+                hint = str(it.get("unknown_hint", "")).strip()
+                if hint:
+                    clue["unknown_hint"] = hint
             out.append(clue)
         return out
 
@@ -215,14 +220,15 @@ def extract_solution_and_clean_text(raw):
 def extract_unknown_and_clean_text(raw):
     s = raw.strip()
     unknown = False
+    unknown_hint = None
     m = UNKNOWN_RE.search(s)
     if m:
         unknown = True
         hint = m.group(2).strip()
-        before = (s[:m.start()] + " " + s[m.end():]).strip()
-        s = hint if hint else before
-        s = re.sub(r"\s+", " ", s)
-    return s, unknown
+        before = s[:m.start()].strip()
+        s = re.sub(r"\s+", " ", before).strip()
+        unknown_hint = hint
+    return s, unknown, unknown_hint
 
 def parse_clue_entry(raw, fixed_dirs):
     s = raw.strip()
@@ -237,10 +243,17 @@ def parse_clue_entry(raw, fixed_dirs):
     else:
         e_seg, s_seg = s, ""
 
-    e_text, e_unknown = extract_unknown_and_clean_text(e_seg) if e_seg else ("", False)
-    s_text, s_unknown = extract_unknown_and_clean_text(s_seg) if s_seg else ("", False)
-    e_text, e_sol = extract_solution_and_clean_text(e_text) if e_text else ("", None)
-    s_text, s_sol = extract_solution_and_clean_text(s_text) if s_text else ("", None)
+    e_text, e_sol = extract_solution_and_clean_text(e_seg) if e_seg else ("", None)
+    s_text, s_sol = extract_solution_and_clean_text(s_seg) if s_seg else ("", None)
+    e_text, e_unknown, e_unknown_hint = extract_unknown_and_clean_text(e_text) if e_text else ("", False, None)
+    s_text, s_unknown, s_unknown_hint = extract_unknown_and_clean_text(s_text) if s_text else ("", False, None)
+    if e_seg and "!=" in e_seg and e_unknown_hint is None:
+        # Segment can be just "!=" with no clue text.
+        e_unknown = True
+        e_unknown_hint = ""
+    if s_seg and "!=" in s_seg and s_unknown_hint is None:
+        s_unknown = True
+        s_unknown_hint = ""
 
     out = []
 
@@ -248,30 +261,32 @@ def parse_clue_entry(raw, fixed_dirs):
         if unknown and sol:
             raise ValueError(f"{d} clue cannot be unknown and solved at the same time")
 
-    def add(d, t, sol, unknown):
+    def add(d, t, sol, unknown, unknown_hint=None):
         validate_unknown_solution_pair(d, sol, unknown)
         item = {"dir": d, "text": t}
         if sol:
             item["solution"] = sol
         if unknown:
             item["unknown"] = True
+            if unknown_hint:
+                item["unknown_hint"] = unknown_hint
         out.append(item)
 
     if fixed_dirs == ["E"]:
-        add("E", e_text or s_text, e_sol or s_sol, e_unknown or s_unknown)
+        add("E", e_text or s_text, e_sol or s_sol, e_unknown or s_unknown, e_unknown_hint if e_unknown else s_unknown_hint)
         return out
 
     if fixed_dirs == ["S"]:
-        add("S", s_text or e_text, s_sol or e_sol, s_unknown or e_unknown)
+        add("S", s_text or e_text, s_sol or e_sol, s_unknown or e_unknown, s_unknown_hint if s_unknown else e_unknown_hint)
         return out
 
     if (e_text or e_sol or e_unknown) and (s_text or s_sol or s_unknown):
-        add("E", e_text, e_sol, e_unknown)
-        add("S", s_text, s_sol, s_unknown)
+        add("E", e_text, e_sol, e_unknown, e_unknown_hint)
+        add("S", s_text, s_sol, s_unknown, s_unknown_hint)
     elif e_text or e_sol or e_unknown:
-        add("E", e_text, e_sol, e_unknown)
+        add("E", e_text, e_sol, e_unknown, e_unknown_hint)
     elif s_text or s_sol or s_unknown:
-        add("S", s_text, s_sol, s_unknown)
+        add("S", s_text, s_sol, s_unknown, s_unknown_hint)
     else:
         raise ValueError("No clue text")
 
@@ -483,9 +498,12 @@ def curses_editor(stdscr, grid, clue_map, rack):
                 t = it.get("text", "")
                 sol = it.get("solution")
                 unknown = bool(it.get("unknown"))
-                p = (f"!={t}" if unknown else t)
+                unknown_hint = str(it.get("unknown_hint", "")).strip()
+                p = t
                 if sol:
                     p += f" s={sol}"
+                if unknown:
+                    p += f" !={unknown_hint or t}"
                 return p.strip()
             e = next((it for it in items if str(it.get("dir","")).upper() == "E"), None)
             s_ = next((it for it in items if str(it.get("dir","")).upper() == "S"), None)
