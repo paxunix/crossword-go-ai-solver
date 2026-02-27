@@ -116,6 +116,40 @@ def format_clue_preview(items: List[dict]) -> str:
         parts.append("S: " + fmt(s))
     return " | ".join(parts)
 
+def iter_slot_cells(grid, clue_r: int, clue_c: int, direction: str):
+    if direction == "E":
+        dr, dc = 0, 1
+    elif direction == "S":
+        dr, dc = 1, 0
+    else:
+        return []
+
+    out = []
+    r, c = clue_r + dr, clue_c + dc
+    while 0 <= r < ROWS and 0 <= c < COLS and grid[r][c] != "#":
+        if not is_interior(r, c):
+            break
+        out.append((r, c))
+        r += dr
+        c += dc
+    return out
+
+def is_clue_complete(grid, clue_r: int, clue_c: int, clue_items: List[dict]) -> bool:
+    dirs = []
+    for it in clue_items:
+        d = str(it.get("dir", "")).upper()
+        if d in {"E", "S"}:
+            dirs.append(d)
+    if not dirs:
+        return False
+    for d in dirs:
+        cells = iter_slot_cells(grid, clue_r, clue_c, d)
+        if not cells:
+            continue
+        if any(not ("A" <= grid[r][c] <= "Z") for r, c in cells):
+            return False
+    return True
+
 
 # --------------------------------------------------
 # JSON load/save
@@ -501,8 +535,7 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells):
 
         if mode == "suggest":
             y = add_wrapped(y, "Suggest Mode: UP/DOWN select | ENTER apply | TAB back to edit | u undo last play")
-            if status_msg:
-                y = add_wrapped(y, status_msg)
+            y = add_wrapped(y, f"Status: {status_msg}" if status_msg else "Status:")
             rack_str = "".join(rack) if rack else "(empty)"
             y = add_wrapped(y, f"Rack: {rack_str}")
 
@@ -539,8 +572,7 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells):
                 y = add_wrapped(y, "Clue: " + preview)
             else:
                 y = add_wrapped(y, "Clue: (none)")
-            if status_msg:
-                y = add_wrapped(y, status_msg)
+            y = add_wrapped(y, f"Status: {status_msg}" if status_msg else "Status:")
 
             y += 1  # blank line
 
@@ -567,7 +599,12 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells):
                 cell = cell_label(rr, cc)
 
                 attr = 0
-                if ch == "#" and cell in clue_map and curses.has_colors():
+                if (
+                    ch == "#"
+                    and cell in clue_map
+                    and curses.has_colors()
+                    and not is_clue_complete(grid, rr, cc, clue_map.get(cell, []))
+                ):
                     attr |= curses.color_pair(1)
                 if cell in opponent_new_cells and curses.has_colors():
                     attr |= curses.color_pair(4)
@@ -870,7 +907,12 @@ def curses_suggest_viewer(stdscr, grid, clue_map, rack, opponent_new_cells, move
                 ch = grid[rr][cc]
 
                 attr = 0
-                if ch == "#" and cell in clue_map and curses.has_colors():
+                if (
+                    ch == "#"
+                    and cell in clue_map
+                    and curses.has_colors()
+                    and not is_clue_complete(grid, rr, cc, clue_map.get(cell, []))
+                ):
                     attr |= curses.color_pair(1)
                 if cell in opponent_new_cells and curses.has_colors():
                     attr |= curses.color_pair(4)

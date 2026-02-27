@@ -138,6 +138,16 @@ class UnknownClueTests(unittest.TestCase):
         self.assertEqual(out["rack"], ["C"])
         self.assertEqual(out["opponent_new_cells"], [])
 
+    def test_is_clue_complete(self):
+        grid = cw.make_initial_grid()
+        # A2:E spans B2..H2
+        self.assertFalse(cw.is_clue_complete(grid, 1, 0, [{"dir": "E", "text": "across"}]))
+        for col, ch in zip("BCDEFGH", "ABCDEFG"):
+            r = 1
+            c = cw.COL_LABELS.index(col)
+            grid[r][c] = ch
+        self.assertTrue(cw.is_clue_complete(grid, 1, 0, [{"dir": "E", "text": "across"}]))
+
 
 if __name__ == "__main__":
     unittest.main()
