@@ -4,6 +4,7 @@ import curses
 import json
 import re
 import sys
+import textwrap
 from typing import Dict, List
 
 ROWS = 10
@@ -262,12 +263,15 @@ def parse_clue_entry(raw, fixed_dirs):
 def curses_editor(stdscr, grid, clue_map, rack):
     curses.curs_set(0)
     stdscr.keypad(True)
+    prompt_cell = None
+    wrap_width = 79
 
     if curses.has_colors():
         curses.start_color()
         curses.use_default_colors()
         curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_YELLOW)  # clue-entered highlight
         curses.init_pair(2, curses.COLOR_BLACK, curses.COLOR_CYAN)    # cursor highlight
+        curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_GREEN)   # active clue edit cell
 
     r, c = 1, 1
 
@@ -276,45 +280,93 @@ def curses_editor(stdscr, grid, clue_map, rack):
         "ENTER: '.'->'#'+clue, '#' edit clue | clue text: use ! for unknown | Ctrl-R rack | Ctrl-W save | Ctrl-X quit"
     ]
 
+    def state_fingerprint():
+        return json.dumps(build_state_json(grid, clue_map, rack), sort_keys=True)
+
+    initial_fp = state_fingerprint()
+
+    def request_exit():
+        if state_fingerprint() == initial_fp:
+            raise KeyboardInterrupt()
+        ans = prompt_line("Unsaved changes. Save before exit? [s]ave/[d]iscard/[c]ancel: ").lower()
+        if ans.startswith("s"):
+            return True
+        if ans.startswith("d"):
+            raise KeyboardInterrupt()
+        return False
+
     def footer_y():
         return max(0, curses.LINES - 2)
 
-    def prompt_line(prompt):
-        y = footer_y()
-        stdscr.move(y, 0)
-        stdscr.clrtoeol()
-        stdscr.addstr(y, 0, prompt[:max(0, curses.COLS-1)])
+    def ui_width():
+        return max(10, min(wrap_width, max(1, curses.COLS - 1)))
+
+    def wrapped_lines(text: str):
+        w = ui_width()
+        return textwrap.wrap(text, width=w) or [""]
+
+    def add_wrapped(y: int, text: str):
+        for ln in wrapped_lines(text):
+            if y >= curses.LINES:
+                break
+            stdscr.addstr(y, 0, ln)
+            y += 1
+        return y
+
+    def prompt_line(prompt, clue_cell=None):
+        nonlocal prompt_cell
+        prompt_cell = clue_cell
+        draw()
+
+        lines = wrapped_lines(prompt)
+        prompt_top = max(0, curses.LINES - len(lines))
+        for i in range(prompt_top, curses.LINES):
+            stdscr.move(i, 0)
+            stdscr.clrtoeol()
+        for i, ln in enumerate(lines):
+            y = prompt_top + i
+            if y < curses.LINES:
+                stdscr.addstr(y, 0, ln)
+
+        y = prompt_top + len(lines) - 1
         stdscr.refresh()
+
+        try:
+            curses.curs_set(1)
+        except curses.error:
+            pass
+
         curses.echo()
         try:
-            start_x = min(len(prompt), max(0, curses.COLS-1))
+            start_x = min(len(lines[-1]), ui_width())
+            stdscr.move(y, start_x)
             s = stdscr.getstr(y, start_x).decode("utf-8", errors="replace")
         finally:
             curses.noecho()
+            try:
+                curses.curs_set(0)
+            except curses.error:
+                pass
+            prompt_cell = None
         return s.strip()
 
     def draw():
         stdscr.erase()
         y = 0
         for line in help_lines:
-            stdscr.addstr(y, 0, line[:max(0, curses.COLS-1)])
-            y += 1
+            y = add_wrapped(y, line)
 
         rack_str = "".join(rack) if rack else "(empty)"
-        stdscr.addstr(y, 0, f"Rack: {rack_str}")
-        y += 1
+        y = add_wrapped(y, f"Rack: {rack_str}")
 
         cur_cell = cell_label(r, c)
-        stdscr.addstr(y, 0, f"Cursor {cur_cell} '{grid[r][c]}'")
-        y += 1
+        y = add_wrapped(y, f"Cursor {cur_cell} '{grid[r][c]}'")
 
         preview = format_clue_preview(clue_map.get(cur_cell, []))
         if preview:
-            stdscr.addstr(y, 0, ("Clue: " + preview)[:max(0, curses.COLS-1)])
-            y += 1
+            y = add_wrapped(y, "Clue: " + preview)
         else:
-            stdscr.addstr(y, 0, "Clue: (none)"[:max(0, curses.COLS-1)])
-            y += 1
+            y = add_wrapped(y, "Clue: (none)")
 
         y += 1  # blank line
 
@@ -331,7 +383,9 @@ def curses_editor(stdscr, grid, clue_map, rack):
                 if ch == "#" and cell in clue_map and curses.has_colors():
                     attr |= curses.color_pair(1)
 
-                if rr == r and cc == c:
+                if prompt_cell == (rr, cc):
+                    attr = curses.color_pair(3) if curses.has_colors() else (curses.A_REVERSE | curses.A_BOLD)
+                elif rr == r and cc == c:
                     attr = curses.color_pair(2) if curses.has_colors() else curses.A_REVERSE
 
                 stdscr.addstr(y+rr, 5+2*cc, ch, attr)
@@ -379,7 +433,18 @@ def curses_editor(stdscr, grid, clue_map, rack):
             elif s_:
                 existing = "/" + part(s_)
 
-        line = prompt_line(f"{cell} clue [text, split E/S with '/', optional s=WORD] [{existing}]: ")
+        dir_hint = ""
+        if fixed == ["E"]:
+            dir_hint = "dir fixed: E"
+        elif fixed == ["S"]:
+            dir_hint = "dir fixed: S"
+        else:
+            dir_hint = "dir: E/S"
+
+        line = prompt_line(
+            f"{cell} clue [{dir_hint}; split E/S with '/', optional s=WORD] [{existing}]: "
+            , clue_cell=(r, c)
+        )
         if not line:
             return
 
@@ -390,10 +455,17 @@ def curses_editor(stdscr, grid, clue_map, rack):
 
     while True:
         draw()
-        ch = stdscr.getch()
+        try:
+            ch = stdscr.getch()
+        except KeyboardInterrupt:
+            if request_exit():
+                return grid, clue_map, rack
+            continue
 
         if ch == CTRL_X:
-            raise KeyboardInterrupt()
+            if request_exit():
+                return grid, clue_map, rack
+            continue
 
         if ch == CTRL_W:
             return grid, clue_map, rack
@@ -420,15 +492,17 @@ def curses_editor(stdscr, grid, clue_map, rack):
                 grid[r][c] = "."
             continue
 
-        if 32 <= ch <= 126 and is_interior(r, c):
+        if 32 <= ch <= 126:
             s = chr(ch).upper()
-            if s == "3":
-                grid[r][c] = "#"
-            elif s in {"!", "1"}:
-                grid[r][c] = "#"
-                enter_clue()
+            if s in {"3", "#", "!", "1"}:
+                if is_interior(r, c):
+                    grid[r][c] = "#"
+                    enter_clue()
+                elif grid[r][c] == "#":
+                    enter_clue()
             elif s in {".", "#"} or ("A" <= s <= "Z"):
-                grid[r][c] = s
+                if is_interior(r, c):
+                    grid[r][c] = s
 
 
 # --------------------------------------------------
