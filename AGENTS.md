@@ -154,7 +154,8 @@ Example:
         {"dir":"S","text":"UPPER WEST","solution":"UW"}
       ]
     }
-  ]
+  ],
+  "opponent_new_cells": ["C3","D6"]
 }
 
 ---
@@ -203,8 +204,20 @@ Each clue entry:
 {
   "dir": "E" | "S",
   "text": "...",
-  "solution": "WORD" (optional)
+  "solution": "WORD" (optional),
+  "unknown": true (optional),
+  "unknown_hint": "..." (optional)
 }
+
+---
+
+### opponent_new_cells
+
+Optional metadata:
+- list of cell labels for letters newly played by opponent.
+- example: `["C3","D6"]`
+
+This is metadata only (not a grid token).
 
 ---
 
@@ -235,11 +248,21 @@ Optional known solution:
 
 s=WORD
 
+Optional unknown clue hint:
+
+!=HINT
+
 Examples:
 
 P_ANO s=PIANO
 
 TARGET GROUP s=TG / UPPER WEST s=UW
+
+MAYBE A LOGO !=grey circle
+
+Rules:
+- `s=` and `!=` apply per clue direction (per segment).
+- A single direction cannot be both solved and unknown.
 
 ---
 
@@ -254,9 +277,18 @@ Keyboard:
 - Enter:
   - "." → "#" + clue entry
   - "#" → edit clue
+- Tab: toggle Edit/Suggest mode
+- Ctrl-U: undo last committed suggested play (single-step)
+- *: toggle opponent-new marker for a letter cell
 - Ctrl-R: edit rack
-- Ctrl-W: save
+- Ctrl-W: save in-place (stay in editor)
+- Ctrl-O: output/dump and exit
 - Ctrl-X: quit
+
+Suggest mode:
+- Shows top deterministic move options and live board preview.
+- Enter commits selected move in-session (updates grid + rack).
+- Committing a suggested move clears `opponent_new_cells`.
 
 Header displays:
 
