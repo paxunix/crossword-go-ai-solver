@@ -15,7 +15,8 @@ CTRL_W = 23  # save
 CTRL_X = 24  # quit
 CTRL_R = 18  # rack edit
 
-SOLUTION_RE = re.compile(r'(^|\s)s=([A-Za-z]+)\b')
+SOLUTION_RE = re.compile(r'(^|\s)s=([A-Za-z]+)\b', re.IGNORECASE)
+UNKNOWN_RE = re.compile(r'(^|\s)!=(.*)$', re.IGNORECASE)
 
 
 # --------------------------------------------------
@@ -87,11 +88,11 @@ def format_clue_preview(items: List[dict]) -> str:
         sol = it.get("solution")
         sol = str(sol).strip().upper() if sol else ""
         unknown = bool(it.get("unknown"))
-        unk = " ! " if unknown else ""
+        unk = f"!={text}" if unknown else ""
         if sol:
             base = f"{text} (s={sol})" if text else f"(s={sol})"
-            return (unk + base).strip()
-        return (unk + text).strip()
+            return f"{unk} {base}".strip() if unk else base
+        return unk if unk else text
 
     parts = []
     if e:
@@ -204,10 +205,13 @@ def extract_solution_and_clean_text(raw):
 def extract_unknown_and_clean_text(raw):
     s = raw.strip()
     unknown = False
-    if "!" in s:
+    m = UNKNOWN_RE.search(s)
+    if m:
         unknown = True
-        s = s.replace("!", " ")
-        s = re.sub(r"\s+", " ", s).strip()
+        hint = m.group(2).strip()
+        before = (s[:m.start()] + " " + s[m.end():]).strip()
+        s = hint if hint else before
+        s = re.sub(r"\s+", " ", s)
     return s, unknown
 
 def parse_clue_entry(raw, fixed_dirs):
@@ -285,7 +289,7 @@ def curses_editor(stdscr, grid, clue_map, rack):
 
     help_lines = [
         "ARROWS move | A-Z letter | 3/# clue | !/1 unknown clue | SPACE/BKSP=.",
-        "ENTER: '.'->'#'+clue, '#' edit clue | clue text: use ! for unknown | Ctrl-R rack | Ctrl-W save | Ctrl-X quit"
+        "ENTER: '.'->'#'+clue, '#' edit clue | clue text: use !=HINT for unknown | Ctrl-R rack | Ctrl-W save | Ctrl-X quit"
     ]
 
     def state_fingerprint():
@@ -344,44 +348,17 @@ def curses_editor(stdscr, grid, clue_map, rack):
         except curses.error:
             pass
 
+        curses.echo()
         s = ""
         try:
             start_x = min(len(lines[-1]), ui_width())
             stdscr.move(y, start_x)
-            buf = []
-            max_len = max(0, ui_width() - start_x)
-            while True:
-                try:
-                    ch = stdscr.get_wch()
-                except KeyboardInterrupt:
-                    buf = []
-                    break
-
-                if ch in ("\n", "\r") or ch == curses.KEY_ENTER:
-                    break
-                if ch == "\x1b":  # ESC cancels prompt
-                    buf = []
-                    break
-                if ch in ("\b", "\x7f") or ch == curses.KEY_BACKSPACE:
-                    if buf:
-                        buf.pop()
-                        stdscr.move(y, start_x)
-                        stdscr.clrtoeol()
-                        stdscr.addstr(y, start_x, "".join(buf))
-                        stdscr.move(y, start_x + len(buf))
-                        stdscr.refresh()
-                    continue
-
-                if isinstance(ch, str) and ch.isprintable():
-                    if len(buf) < max_len:
-                        buf.append(ch)
-                        stdscr.addstr(y, start_x + len(buf) - 1, ch)
-                        stdscr.move(y, start_x + len(buf))
-                        stdscr.refresh()
-                    continue
-
-            s = "".join(buf)
+            try:
+                s = stdscr.getstr(y, start_x).decode("utf-8", errors="replace")
+            except KeyboardInterrupt:
+                s = ""
         finally:
+            curses.noecho()
             try:
                 curses.curs_set(0)
             except curses.error:
@@ -465,7 +442,7 @@ def curses_editor(stdscr, grid, clue_map, rack):
                 t = it.get("text", "")
                 sol = it.get("solution")
                 unknown = bool(it.get("unknown"))
-                p = ("! " if unknown else "") + t
+                p = (f"!={t}" if unknown else t)
                 if sol:
                     p += f" s={sol}"
                 return p.strip()
@@ -487,15 +464,11 @@ def curses_editor(stdscr, grid, clue_map, rack):
             dir_hint = "dir: E/S"
 
         line = prompt_line(
-            f"{cell} clue [{dir_hint}; split E/S with '/', optional s=WORD] [{existing}]: "
+            f"{cell} clue [{dir_hint}; split E/S with '/', optional s=WORD, !=HINT] [{existing}]: "
             , clue_cell=(r, c)
         )
-        if not line and force_unknown:
-            line = "!"
         if not line:
             return
-        if force_unknown and "!" not in line:
-            line = "! " + line
 
         try:
             clue_map[cell] = parse_clue_entry(line, fixed)
