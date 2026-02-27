@@ -221,6 +221,28 @@ def build_state_json(grid, clue_map, rack, opponent_new_cells):
     }
 
 
+def apply_placements_to_state(state, placements):
+    grid, clue_map, rack, _ = validate_and_normalize_state(state)
+
+    rack_remaining = rack[:]
+    for cell, letter in placements:
+        if letter in rack_remaining:
+            rack_remaining.remove(letter)
+        else:
+            raise ValueError(f"Selected move uses unavailable rack letter: {letter}")
+
+        rc = cell.strip().upper()
+        r = int(rc[1:]) - 1
+        c = COL_LABELS.index(rc[0])
+        if grid[r][c] != ".":
+            raise ValueError(f"Selected move targets non-empty cell: {cell}")
+        grid[r][c] = letter
+
+    # Once player accepts a move, prior opponent markers no longer apply.
+    opponent_new_cells = set()
+    return build_state_json(grid, clue_map, rack_remaining, opponent_new_cells)
+
+
 # --------------------------------------------------
 # Clue parsing (text; split E/S; optional s=WORD)
 # --------------------------------------------------
@@ -629,6 +651,126 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells):
                         opponent_new_cells.discard(cell_label(r, c))
 
 
+def curses_suggest_viewer(stdscr, grid, clue_map, rack, opponent_new_cells, moves):
+    curses.curs_set(0)
+    stdscr.keypad(True)
+
+    cell_w = 3
+    cell_gap = 1
+    cell_step = cell_w + cell_gap
+    sel = 0
+    scroll = 0
+
+    if curses.has_colors():
+        curses.start_color()
+        curses.use_default_colors()
+        curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_YELLOW)  # clue-entered highlight
+        curses.init_pair(2, curses.COLOR_BLACK, curses.COLOR_CYAN)    # selected move row
+        curses.init_pair(4, curses.COLOR_BLACK, curses.COLOR_MAGENTA) # opponent marker
+        curses.init_pair(5, curses.COLOR_BLACK, curses.COLOR_GREEN)   # suggested placements
+
+    def draw():
+        nonlocal scroll
+        stdscr.erase()
+        y = 0
+        stdscr.addstr(y, 0, "SUGGEST: UP/DOWN select move | ENTER accept | q/ESC quit"[:max(1, curses.COLS - 1)])
+        y += 1
+
+        rack_str = "".join(rack) if rack else "(empty)"
+        stdscr.addstr(y, 0, f"Rack: {rack_str}"[:max(1, curses.COLS - 1)])
+        y += 1
+
+        list_h = max(3, min(12, curses.LINES // 3))
+        if sel < scroll:
+            scroll = sel
+        if sel >= scroll + list_h:
+            scroll = sel - list_h + 1
+
+        for i in range(list_h):
+            idx = scroll + i
+            row_y = y + i
+            if idx >= len(moves) or row_y >= curses.LINES:
+                break
+            mv = moves[idx]
+            if mv.placements:
+                ps = ", ".join(f"{c}={l}" for c, l in mv.placements)
+            else:
+                ps = "(pass)"
+            line = f"{idx+1:>2}. {ps} | t={mv.tile_points} w={mv.word_points} b={mv.bonus} total={mv.total}"
+            attr = curses.color_pair(2) if (idx == sel and curses.has_colors()) else (curses.A_REVERSE if idx == sel else 0)
+            stdscr.addstr(row_y, 0, line[:max(1, curses.COLS - 1)], attr)
+
+        y += list_h + 1
+        if y >= curses.LINES:
+            stdscr.refresh()
+            return
+
+        header = "     " + "".join(f"{c:^{cell_step}}" for c in COL_LABELS).rstrip()
+        stdscr.addstr(y, 0, header[:max(1, curses.COLS - 1)])
+        y += 1
+
+        move_cells = {cell for cell, _ in moves[sel].placements} if moves else set()
+        move_letters = {cell: letter for cell, letter in moves[sel].placements} if moves else {}
+
+        for rr in range(ROWS):
+            row_y = y + rr
+            if row_y >= curses.LINES:
+                break
+            stdscr.addstr(row_y, 0, f"{rr+1:>3}  ")
+            for cc in range(COLS):
+                cell = cell_label(rr, cc)
+                ch = grid[rr][cc]
+
+                attr = 0
+                if ch == "#" and cell in clue_map and curses.has_colors():
+                    attr |= curses.color_pair(1)
+                if cell in opponent_new_cells and curses.has_colors():
+                    attr |= curses.color_pair(4)
+                if cell in move_cells and curses.has_colors():
+                    attr = curses.color_pair(5)
+
+                draw_ch = f" {ch} "
+                if cell in move_letters:
+                    draw_ch = f" {move_letters[cell]} "
+                elif ch == "#":
+                    items = clue_map.get(cell, [])
+                    e_item = next((it for it in items if str(it.get("dir", "")).upper() == "E"), None)
+                    s_item = next((it for it in items if str(it.get("dir", "")).upper() == "S"), None)
+
+                    def clue_mark(it):
+                        if not it:
+                            return " "
+                        return "!" if bool(it.get("unknown")) else "#"
+
+                    fixed = fixed_dirs_for_cell(rr, cc)
+                    if fixed == ["E"]:
+                        draw_ch = f" {clue_mark(e_item)} "
+                    elif fixed == ["S"]:
+                        draw_ch = f" {clue_mark(s_item)} "
+                    else:
+                        draw_ch = f"{clue_mark(e_item)}/{clue_mark(s_item)}"
+
+                x = 5 + cell_step * cc
+                if x < curses.COLS:
+                    stdscr.addstr(row_y, x, draw_ch[:max(0, curses.COLS - x)], attr)
+
+        stdscr.refresh()
+
+    while True:
+        draw()
+        ch = stdscr.getch()
+        if ch in (ord("q"), 27):
+            return None
+        if ch in (10, 13, curses.KEY_ENTER):
+            return sel
+        if ch == curses.KEY_UP:
+            sel = max(0, sel - 1)
+            continue
+        if ch == curses.KEY_DOWN:
+            sel = min(max(0, len(moves) - 1), sel + 1)
+            continue
+
+
 # --------------------------------------------------
 # Main
 # --------------------------------------------------
@@ -654,16 +796,38 @@ def main():
     if args.command == "suggest":
         state = load_state(args.json_path)
         moves = generate_forced_moves(state, top=args.top)
-        print(f"Top {len(moves)} move(s) for {args.json_path}:")
-        for i, mv in enumerate(moves, start=1):
-            if mv.placements:
-                ps = ", ".join(f"{c}={l}" for c, l in mv.placements)
-            else:
-                ps = "(pass)"
-            print(f"{i}. {ps}")
-            print(f"   tile={mv.tile_points} word={mv.word_points} bonus={mv.bonus} total={mv.total}")
-            if mv.completed_slots:
-                print(f"   completed={', '.join(mv.completed_slots)}")
+
+        # Interactive TUI when attached to a terminal; fallback to text otherwise.
+        if sys.stdin.isatty() and sys.stdout.isatty():
+            grid, clue_map, rack, opponent_new_cells = validate_and_normalize_state(state)
+            selected = curses.wrapper(
+                lambda stdscr: curses_suggest_viewer(
+                    stdscr, grid, clue_map, rack, opponent_new_cells, moves
+                )
+            )
+            if selected is not None:
+                mv = moves[selected]
+                ps = ", ".join(f"{c}={l}" for c, l in mv.placements) if mv.placements else "(pass)"
+                print(f"Selected: {ps}")
+                print(f"tile={mv.tile_points} word={mv.word_points} bonus={mv.bonus} total={mv.total}")
+                if mv.completed_slots:
+                    print(f"completed={', '.join(mv.completed_slots)}")
+                updated = apply_placements_to_state(state, mv.placements)
+                with open(args.json_path, "w", encoding="utf-8") as f:
+                    f.write(json.dumps(updated, indent=2))
+                    f.write("\n")
+                print(f"Saved: {args.json_path}")
+        else:
+            print(f"Top {len(moves)} move(s) for {args.json_path}:")
+            for i, mv in enumerate(moves, start=1):
+                if mv.placements:
+                    ps = ", ".join(f"{c}={l}" for c, l in mv.placements)
+                else:
+                    ps = "(pass)"
+                print(f"{i}. {ps}")
+                print(f"   tile={mv.tile_points} word={mv.word_points} bonus={mv.bonus} total={mv.total}")
+                if mv.completed_slots:
+                    print(f"   completed={', '.join(mv.completed_slots)}")
         return
 
     json_path = getattr(args, "json_path", None)

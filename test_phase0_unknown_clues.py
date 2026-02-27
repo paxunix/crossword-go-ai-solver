@@ -124,6 +124,20 @@ class UnknownClueTests(unittest.TestCase):
         out = cw.build_state_json(ng, clue_map, rack, opp)
         self.assertEqual(out["opponent_new_cells"], ["C3"])
 
+    def test_apply_placements_updates_grid_rack_and_clears_opponent_metadata(self):
+        grid = cw.make_initial_grid()
+        state = {
+            "grid": grid,
+            "rack": ["A", "B", "C"],
+            "clues": [],
+            "opponent_new_cells": ["C3"],
+        }
+        out = cw.apply_placements_to_state(state, [("B2", "A"), ("C2", "B")])
+        self.assertEqual(out["grid"][1][1], "A")  # B2
+        self.assertEqual(out["grid"][1][2], "B")  # C2
+        self.assertEqual(out["rack"], ["C"])
+        self.assertEqual(out["opponent_new_cells"], [])
+
 
 if __name__ == "__main__":
     unittest.main()
