@@ -85,9 +85,12 @@ def format_clue_preview(items: List[dict]) -> str:
         text = str(it.get("text", "")).strip()
         sol = it.get("solution")
         sol = str(sol).strip().upper() if sol else ""
+        unknown = bool(it.get("unknown"))
+        unk = " ! " if unknown else ""
         if sol:
-            return f"{text} (s={sol})" if text else f"(s={sol})"
-        return text
+            base = f"{text} (s={sol})" if text else f"(s={sol})"
+            return (unk + base).strip()
+        return (unk + text).strip()
 
     parts = []
     if e:
@@ -125,12 +128,32 @@ def validate_and_normalize_state(state):
     for r in range(1, ROWS):
         grid[r][0] = "#"
 
+    def normalize_clue_items(items):
+        out = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            d = str(it.get("dir", "")).strip().upper()
+            if d not in {"E", "S"}:
+                continue
+            t = str(it.get("text", ""))
+            clue = {"dir": d, "text": t}
+            sol = it.get("solution")
+            if sol:
+                s = str(sol).strip().upper()
+                if s and all("A" <= ch <= "Z" for ch in s):
+                    clue["solution"] = s
+            if bool(it.get("unknown")):
+                clue["unknown"] = True
+            out.append(clue)
+        return out
+
     clue_map = {}
     for entry in state.get("clues", []):
         cell = entry.get("cell")
         if not cell:
             continue
-        clue_map[str(cell).strip().upper()] = entry.get("clues", [])
+        clue_map[str(cell).strip().upper()] = normalize_clue_items(entry.get("clues", []))
 
     rack_raw = state.get("rack", [])
     rack = []
@@ -174,6 +197,15 @@ def extract_solution_and_clean_text(raw):
         s = re.sub(r"\s+", " ", s)
     return s, sol
 
+def extract_unknown_and_clean_text(raw):
+    s = raw.strip()
+    unknown = False
+    if "!" in s:
+        unknown = True
+        s = s.replace("!", " ")
+        s = re.sub(r"\s+", " ", s).strip()
+    return s, unknown
+
 def parse_clue_entry(raw, fixed_dirs):
     s = raw.strip()
     if not s:
@@ -187,32 +219,36 @@ def parse_clue_entry(raw, fixed_dirs):
     else:
         e_seg, s_seg = s, ""
 
-    e_text, e_sol = extract_solution_and_clean_text(e_seg) if e_seg else ("", None)
-    s_text, s_sol = extract_solution_and_clean_text(s_seg) if s_seg else ("", None)
+    e_text, e_unknown = extract_unknown_and_clean_text(e_seg) if e_seg else ("", False)
+    s_text, s_unknown = extract_unknown_and_clean_text(s_seg) if s_seg else ("", False)
+    e_text, e_sol = extract_solution_and_clean_text(e_text) if e_text else ("", None)
+    s_text, s_sol = extract_solution_and_clean_text(s_text) if s_text else ("", None)
 
     out = []
 
-    def add(d, t, sol):
+    def add(d, t, sol, unknown):
         item = {"dir": d, "text": t}
         if sol:
             item["solution"] = sol
+        if unknown:
+            item["unknown"] = True
         out.append(item)
 
     if fixed_dirs == ["E"]:
-        add("E", e_text or s_text, e_sol or s_sol)
+        add("E", e_text or s_text, e_sol or s_sol, e_unknown or s_unknown)
         return out
 
     if fixed_dirs == ["S"]:
-        add("S", s_text or e_text, s_sol or e_sol)
+        add("S", s_text or e_text, s_sol or e_sol, s_unknown or e_unknown)
         return out
 
     if (e_text or e_sol) and (s_text or s_sol):
-        add("E", e_text, e_sol)
-        add("S", s_text, s_sol)
+        add("E", e_text, e_sol, e_unknown)
+        add("S", s_text, s_sol, s_unknown)
     elif e_text or e_sol:
-        add("E", e_text, e_sol)
+        add("E", e_text, e_sol, e_unknown)
     elif s_text or s_sol:
-        add("S", s_text, s_sol)
+        add("S", s_text, s_sol, s_unknown)
     else:
         raise ValueError("No clue text")
 
@@ -236,8 +272,8 @@ def curses_editor(stdscr, grid, clue_map, rack):
     r, c = 1, 1
 
     help_lines = [
-        "ARROWS move | A-Z letter | 3=# | SPACE/BKSP=.",
-        "ENTER: '.'->'#'+clue, '#' edit clue | Ctrl-R rack | Ctrl-W save | Ctrl-X quit"
+        "ARROWS move | A-Z letter | 3=# | !=unknown #+clue | SPACE/BKSP=.",
+        "ENTER: '.'->'#'+clue, '#' edit clue | clue text: use ! for unknown | Ctrl-R rack | Ctrl-W save | Ctrl-X quit"
     ]
 
     def footer_y():
@@ -329,7 +365,11 @@ def curses_editor(stdscr, grid, clue_map, rack):
             def part(it):
                 t = it.get("text", "")
                 sol = it.get("solution")
-                return (t + (f" s={sol}" if sol else "")).strip()
+                unknown = bool(it.get("unknown"))
+                p = ("! " if unknown else "") + t
+                if sol:
+                    p += f" s={sol}"
+                return p.strip()
             e = next((it for it in items if str(it.get("dir","")).upper() == "E"), None)
             s_ = next((it for it in items if str(it.get("dir","")).upper() == "S"), None)
             if e and s_:
@@ -384,6 +424,9 @@ def curses_editor(stdscr, grid, clue_map, rack):
             s = chr(ch).upper()
             if s == "3":
                 grid[r][c] = "#"
+            elif s in {"!", "1"}:
+                grid[r][c] = "#"
+                enter_clue()
             elif s in {".", "#"} or ("A" <= s <= "Z"):
                 grid[r][c] = s
 
