@@ -176,7 +176,7 @@ def render_clue_cell_text(clue_items: List[dict], r: int, c: int) -> str:
     def clue_mark(it):
         if not it:
             return " "
-        return "!" if bool(it.get("unknown")) else "#"
+        return "#"
 
     fixed = fixed_dirs_for_cell(r, c)
     if fixed == ["E"]:
@@ -233,7 +233,11 @@ def draw_board_cells(
                         return attr
                     if clue_dir_complete(grid, rr, cc, direction):
                         return attr
-                    return curses.color_pair(6 if it.get("solution") else 1)
+                    if bool(it.get("unknown")):
+                        return curses.color_pair(7)
+                    if it.get("solution"):
+                        return curses.color_pair(6)
+                    return curses.color_pair(1)
 
                 if fixed == ["E"]:
                     stdscr.addstr(row_y, x, draw_ch[:max(0, curses.COLS - x)], dir_attr("E"))
@@ -256,7 +260,7 @@ def draw_color_legend(stdscr, y: int):
     if y >= curses.LINES:
         return y
     if not curses.has_colors():
-        stdscr.addstr(y, 0, "Legend: cursor | clue | clue+solution | opp-new | suggest/active"[:max(1, curses.COLS - 1)])
+        stdscr.addstr(y, 0, "Legend: cursor | clue | clue+solution | clue+spec | opp-new | suggest/active"[:max(1, curses.COLS - 1)])
         return y + 1
 
     x = 0
@@ -276,6 +280,8 @@ def draw_color_legend(stdscr, y: int):
     put(" clue ", curses.color_pair(1))
     put(" ")
     put(" clue+sol ", curses.color_pair(6))
+    put(" ")
+    put(" clue+spec ", curses.color_pair(7))
     put(" ")
     put(" opp-new ", curses.color_pair(4))
     put(" ")
@@ -527,6 +533,7 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
         curses.use_default_colors()
         curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_YELLOW)  # clue-entered highlight
         curses.init_pair(6, curses.COLOR_BLACK, curses.COLOR_BLUE)    # clue with known solution
+        curses.init_pair(7, curses.COLOR_BLACK, curses.COLOR_RED)     # clue with unknown/speculative info
         curses.init_pair(2, curses.COLOR_BLACK, curses.COLOR_CYAN)    # cursor highlight
         curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_GREEN)   # active clue edit cell
         curses.init_pair(4, curses.COLOR_BLACK, curses.COLOR_MAGENTA) # opponent newly played marker
@@ -983,6 +990,7 @@ def curses_suggest_viewer(stdscr, grid, clue_map, rack, opponent_new_cells, move
         curses.use_default_colors()
         curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_YELLOW)  # clue-entered highlight
         curses.init_pair(6, curses.COLOR_BLACK, curses.COLOR_BLUE)    # clue with known solution
+        curses.init_pair(7, curses.COLOR_BLACK, curses.COLOR_RED)     # clue with unknown/speculative info
         curses.init_pair(2, curses.COLOR_BLACK, curses.COLOR_CYAN)    # selected move row
         curses.init_pair(4, curses.COLOR_BLACK, curses.COLOR_MAGENTA) # opponent marker
         curses.init_pair(5, curses.COLOR_BLACK, curses.COLOR_GREEN)   # suggested placements
