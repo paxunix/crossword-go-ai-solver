@@ -252,6 +252,36 @@ def draw_board_cells(
             else:
                 stdscr.addstr(row_y, x, draw_ch[:max(0, curses.COLS - x)], attr)
 
+def draw_color_legend(stdscr, y: int):
+    if y >= curses.LINES:
+        return y
+    if not curses.has_colors():
+        stdscr.addstr(y, 0, "Legend: cursor | clue | clue+solution | opp-new | suggest/active"[:max(1, curses.COLS - 1)])
+        return y + 1
+
+    x = 0
+    max_x = max(1, curses.COLS - 1)
+
+    def put(text, attr=0):
+        nonlocal x
+        if x >= max_x:
+            return
+        s = text[: max_x - x]
+        stdscr.addstr(y, x, s, attr)
+        x += len(s)
+
+    put("Legend: ")
+    put(" cursor ", curses.color_pair(2))
+    put(" ")
+    put(" clue ", curses.color_pair(1))
+    put(" ")
+    put(" clue+sol ", curses.color_pair(6))
+    put(" ")
+    put(" opp-new ", curses.color_pair(4))
+    put(" ")
+    put(" suggest/active ", curses.color_pair(3))
+    return y + 1
+
 
 # --------------------------------------------------
 # JSON load/save
@@ -676,6 +706,7 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
                 stdscr.addstr(row_y, 0, line[:max(1, curses.COLS - 1)], attr)
 
             y += list_h + 1
+            y = draw_color_legend(stdscr, y)
         else:
             for line in help_lines:
                 y = add_wrapped(y, line)
@@ -692,6 +723,7 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
             else:
                 y = add_wrapped(y, "Clue: (none)")
             y = add_wrapped(y, f"Status: {status_msg}" if status_msg else "Status:")
+            y = draw_color_legend(stdscr, y)
 
             y += 1  # blank line
 
@@ -987,6 +1019,7 @@ def curses_suggest_viewer(stdscr, grid, clue_map, rack, opponent_new_cells, move
             stdscr.addstr(row_y, 0, line[:max(1, curses.COLS - 1)], attr)
 
         y += list_h + 1
+        y = draw_color_legend(stdscr, y)
         if y >= curses.LINES:
             stdscr.refresh()
             return
