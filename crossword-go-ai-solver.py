@@ -16,6 +16,8 @@ COL_LABELS = "ABCDEFGH"
 CTRL_W = 23  # save
 CTRL_X = 24  # quit
 CTRL_R = 18  # rack edit
+CTRL_U = 21  # undo last committed suggested play
+CTRL_O = 15  # output and exit
 TAB = 9
 
 SOLUTION_RE = re.compile(r'(^|\s)s=([A-Za-z]+)\b', re.IGNORECASE)
@@ -278,6 +280,15 @@ def apply_placements_to_state(state, placements):
     return build_state_json(grid, clue_map, rack_remaining, opponent_new_cells)
 
 
+def save_state_file(path, grid, clue_map, rack, opponent_new_cells):
+    if not path:
+        raise ValueError("No save path configured.")
+    out_state = build_state_json(grid, clue_map, rack, opponent_new_cells)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(json.dumps(out_state, indent=2))
+        f.write("\n")
+
+
 # --------------------------------------------------
 # Clue parsing (text; split E/S; optional s=WORD)
 # --------------------------------------------------
@@ -372,7 +383,7 @@ def parse_clue_entry(raw, fixed_dirs):
 # Editor
 # --------------------------------------------------
 
-def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells):
+def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=None):
     curses.curs_set(0)
     stdscr.keypad(True)
     prompt_cell = None
@@ -400,7 +411,7 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells):
 
     help_lines = [
         "ARROWS move | A-Z letter | 3/# clue | !/1 unknown clue | *=toggle opp marker | TAB suggest",
-        "ENTER: '.'->'#'+clue, '#' edit clue | clue text: use !=HINT | u=undo play | Ctrl-R rack | Ctrl-W save | Ctrl-X quit"
+        "ENTER: '.'->'#'+clue, '#' edit clue | clue text: use !=HINT | Ctrl-U undo | Ctrl-R rack | Ctrl-W save | Ctrl-O output | Ctrl-X quit"
     ]
 
     def snapshot_state():
@@ -446,11 +457,18 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells):
     initial_fp = state_fingerprint()
 
     def request_exit():
+        nonlocal status_msg
         if state_fingerprint() == initial_fp:
             raise KeyboardInterrupt()
         ans = prompt_line("Unsaved changes. Save before exit? [s]ave/[d]iscard/[c]ancel: ").lower()
         if ans.startswith("s"):
-            return True
+            try:
+                save_state_file(save_path, grid, clue_map, rack, opponent_new_cells)
+                status_msg = f"Saved: {save_path}"
+                return True
+            except Exception as e:
+                status_msg = f"Save failed: {e}"
+                return False
         if ans.startswith("d"):
             raise KeyboardInterrupt()
         return False
@@ -534,7 +552,7 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells):
         y = 0
 
         if mode == "suggest":
-            y = add_wrapped(y, "Suggest Mode: UP/DOWN select | ENTER apply | TAB back to edit | u undo last play")
+            y = add_wrapped(y, "Suggest Mode: UP/DOWN select | ENTER apply | TAB back to edit | Ctrl-U undo last play")
             y = add_wrapped(y, f"Status: {status_msg}" if status_msg else "Status:")
             rack_str = "".join(rack) if rack else "(empty)"
             y = add_wrapped(y, f"Rack: {rack_str}")
@@ -718,16 +736,24 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells):
             ch = stdscr.getch()
         except KeyboardInterrupt:
             if request_exit():
-                return grid, clue_map, rack, opponent_new_cells
+                return grid, clue_map, rack, opponent_new_cells, "quit"
             continue
 
         if ch == CTRL_X:
             if request_exit():
-                return grid, clue_map, rack, opponent_new_cells
+                return grid, clue_map, rack, opponent_new_cells, "quit"
             continue
 
         if ch == CTRL_W:
-            return grid, clue_map, rack, opponent_new_cells
+            try:
+                save_state_file(save_path, grid, clue_map, rack, opponent_new_cells)
+                status_msg = f"Saved: {save_path}"
+            except Exception as e:
+                status_msg = f"Save failed: {e}"
+            continue
+
+        if ch == CTRL_O:
+            return grid, clue_map, rack, opponent_new_cells, "output"
 
         if ch == CTRL_R:
             edit_rack()
@@ -742,7 +768,7 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells):
                 mode = "edit"
             continue
 
-        if ch in (ord("u"), ord("U")):
+        if ch == CTRL_U:
             if undo_snapshot is not None:
                 restore_snapshot(undo_snapshot)
                 undo_snapshot = None
@@ -769,7 +795,7 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells):
                     grid, clue_map, rack, opponent_new_cells = validate_and_normalize_state(updated)
                     mode = "edit"
                     suggest_stale = True
-                    status_msg = f"Applied move with total={mv.total}. Press 'u' to undo."
+                    status_msg = f"Applied move with total={mv.total}. Press Ctrl-U to undo."
                 except Exception as e:
                     status_msg = f"Apply failed: {e}"
                 continue
@@ -1032,11 +1058,14 @@ def main():
     grid, clue_map, rack, opponent_new_cells = validate_and_normalize_state(state)
 
     try:
-        grid, clue_map, rack, opponent_new_cells = curses.wrapper(
-            lambda stdscr: curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells)
+        grid, clue_map, rack, opponent_new_cells, action = curses.wrapper(
+            lambda stdscr: curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=json_path)
         )
     except KeyboardInterrupt:
         print("\nCancelled.", file=sys.stderr)
+        return
+
+    if action != "output":
         return
 
     out_state = build_state_json(grid, clue_map, rack, opponent_new_cells)
