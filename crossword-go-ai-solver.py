@@ -5,7 +5,7 @@ import json
 import re
 import sys
 import textwrap
-from typing import Dict, List
+from typing import Dict, List, Set
 
 ROWS = 10
 COLS = 8
@@ -184,9 +184,24 @@ def validate_and_normalize_state(state):
                 rack.append(sx)
     rack = rack[:5]
 
-    return grid, clue_map, rack
+    opponent_new_cells: Set[str] = set()
+    for cell in state.get("opponent_new_cells", []):
+        sc = str(cell).strip().upper()
+        if not sc:
+            continue
+        try:
+            rr = int(sc[1:]) - 1
+            cc = COL_LABELS.index(sc[0])
+        except Exception:
+            continue
+        if not is_interior(rr, cc):
+            continue
+        if "A" <= grid[rr][cc] <= "Z":
+            opponent_new_cells.add(sc)
 
-def build_state_json(grid, clue_map, rack):
+    return grid, clue_map, rack, opponent_new_cells
+
+def build_state_json(grid, clue_map, rack, opponent_new_cells):
     def key_fn(cell):
         col = COL_LABELS.index(cell[0])
         row = int(cell[1:]) - 1
@@ -199,7 +214,8 @@ def build_state_json(grid, clue_map, rack):
         "size": {"cols": COLS, "rows": ROWS},
         "rack": rack,
         "grid": grid,
-        "clues": clues
+        "clues": clues,
+        "opponent_new_cells": sorted(opponent_new_cells, key=key_fn),
     }
 
 
@@ -297,7 +313,7 @@ def parse_clue_entry(raw, fixed_dirs):
 # Editor
 # --------------------------------------------------
 
-def curses_editor(stdscr, grid, clue_map, rack):
+def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells):
     curses.curs_set(0)
     stdscr.keypad(True)
     prompt_cell = None
@@ -312,16 +328,17 @@ def curses_editor(stdscr, grid, clue_map, rack):
         curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_YELLOW)  # clue-entered highlight
         curses.init_pair(2, curses.COLOR_BLACK, curses.COLOR_CYAN)    # cursor highlight
         curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_GREEN)   # active clue edit cell
+        curses.init_pair(4, curses.COLOR_BLACK, curses.COLOR_MAGENTA) # opponent newly played marker
 
     r, c = 1, 1
 
     help_lines = [
-        "ARROWS move | A-Z letter | 3/# clue | !/1 unknown clue | SPACE/BKSP=.",
+        "ARROWS move | A-Z letter | 3/# clue | !/1 unknown clue | *=toggle opp marker",
         "ENTER: '.'->'#'+clue, '#' edit clue | clue text: use !=HINT for unknown | Ctrl-R rack | Ctrl-W save | Ctrl-X quit"
     ]
 
     def state_fingerprint():
-        return json.dumps(build_state_json(grid, clue_map, rack), sort_keys=True)
+        return json.dumps(build_state_json(grid, clue_map, rack, opponent_new_cells), sort_keys=True)
 
     initial_fp = state_fingerprint()
 
@@ -441,6 +458,8 @@ def curses_editor(stdscr, grid, clue_map, rack):
                 attr = 0
                 if ch == "#" and cell in clue_map and curses.has_colors():
                     attr |= curses.color_pair(1)
+                if cell in opponent_new_cells and curses.has_colors():
+                    attr |= curses.color_pair(4)
 
                 if prompt_cell == (rr, cc):
                     attr = curses.color_pair(3) if curses.has_colors() else (curses.A_REVERSE | curses.A_BOLD)
@@ -545,11 +564,11 @@ def curses_editor(stdscr, grid, clue_map, rack):
 
         if ch == CTRL_X:
             if request_exit():
-                return grid, clue_map, rack
+                return grid, clue_map, rack, opponent_new_cells
             continue
 
         if ch == CTRL_W:
-            return grid, clue_map, rack
+            return grid, clue_map, rack, opponent_new_cells
 
         if ch == CTRL_R:
             edit_rack()
@@ -572,6 +591,7 @@ def curses_editor(stdscr, grid, clue_map, rack):
             if is_interior(r, c):
                 grid[r][c] = "."
                 clue_map.pop(cell_label(r, c), None)
+                opponent_new_cells.discard(cell_label(r, c))
             continue
 
         if 32 <= ch <= 126:
@@ -579,20 +599,32 @@ def curses_editor(stdscr, grid, clue_map, rack):
             if s in {"3", "#"}:
                 if is_interior(r, c):
                     grid[r][c] = "#"
+                    opponent_new_cells.discard(cell_label(r, c))
                     enter_clue()
                 elif grid[r][c] == "#":
                     enter_clue()
             elif s in {"!", "1"}:
                 if is_interior(r, c):
                     grid[r][c] = "#"
+                    opponent_new_cells.discard(cell_label(r, c))
                     enter_clue(force_unknown=True)
                 elif grid[r][c] == "#":
                     enter_clue(force_unknown=True)
+            elif s == "*":
+                if is_interior(r, c):
+                    cell = cell_label(r, c)
+                    if "A" <= grid[r][c] <= "Z":
+                        if cell in opponent_new_cells:
+                            opponent_new_cells.remove(cell)
+                        else:
+                            opponent_new_cells.add(cell)
             elif s in {".", "#"} or ("A" <= s <= "Z"):
                 if is_interior(r, c):
                     grid[r][c] = s
                     if s != "#":
                         clue_map.pop(cell_label(r, c), None)
+                    if not ("A" <= s <= "Z"):
+                        opponent_new_cells.discard(cell_label(r, c))
 
 
 # --------------------------------------------------
@@ -612,17 +644,17 @@ def main():
     else:
         state = {}
 
-    grid, clue_map, rack = validate_and_normalize_state(state)
+    grid, clue_map, rack, opponent_new_cells = validate_and_normalize_state(state)
 
     try:
-        grid, clue_map, rack = curses.wrapper(
-            lambda stdscr: curses_editor(stdscr, grid, clue_map, rack)
+        grid, clue_map, rack, opponent_new_cells = curses.wrapper(
+            lambda stdscr: curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells)
         )
     except KeyboardInterrupt:
         print("\nCancelled.", file=sys.stderr)
         return
 
-    out_state = build_state_json(grid, clue_map, rack)
+    out_state = build_state_json(grid, clue_map, rack, opponent_new_cells)
     json_text = json.dumps(out_state, indent=2)
 
     print("\n--- FINAL GRID ---")

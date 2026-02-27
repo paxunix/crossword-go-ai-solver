@@ -107,8 +107,22 @@ class UnknownClueTests(unittest.TestCase):
                 {"cell": "B1", "clues": [{"dir": "S", "text": "shape", "unknown": True}]}
             ],
         }
-        _, clue_map, _ = cw.validate_and_normalize_state(state)
+        _, clue_map, _, _ = cw.validate_and_normalize_state(state)
         self.assertTrue(clue_map["B1"][0]["unknown"])
+
+    def test_opponent_new_cells_roundtrip(self):
+        grid = cw.make_initial_grid()
+        grid[2][2] = "V"  # C3
+        state = {
+            "grid": grid,
+            "rack": [],
+            "clues": [],
+            "opponent_new_cells": ["C3", "B2"],  # B2 is '.', should be filtered out
+        }
+        ng, clue_map, rack, opp = cw.validate_and_normalize_state(state)
+        self.assertEqual(opp, {"C3"})
+        out = cw.build_state_json(ng, clue_map, rack, opp)
+        self.assertEqual(out["opponent_new_cells"], ["C3"])
 
 
 if __name__ == "__main__":
