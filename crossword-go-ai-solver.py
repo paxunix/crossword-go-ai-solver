@@ -243,12 +243,12 @@ def parse_clue_entry(raw, fixed_dirs):
         add("S", s_text or e_text, s_sol or e_sol, s_unknown or e_unknown)
         return out
 
-    if (e_text or e_sol) and (s_text or s_sol):
+    if (e_text or e_sol or e_unknown) and (s_text or s_sol or s_unknown):
         add("E", e_text, e_sol, e_unknown)
         add("S", s_text, s_sol, s_unknown)
-    elif e_text or e_sol:
+    elif e_text or e_sol or e_unknown:
         add("E", e_text, e_sol, e_unknown)
-    elif s_text or s_sol:
+    elif s_text or s_sol or s_unknown:
         add("S", s_text, s_sol, s_unknown)
     else:
         raise ValueError("No clue text")
@@ -276,7 +276,7 @@ def curses_editor(stdscr, grid, clue_map, rack):
     r, c = 1, 1
 
     help_lines = [
-        "ARROWS move | A-Z letter | 3=# | !=unknown #+clue | SPACE/BKSP=.",
+        "ARROWS move | A-Z letter | 3/# clue | !/1 unknown clue | SPACE/BKSP=.",
         "ENTER: '.'->'#'+clue, '#' edit clue | clue text: use ! for unknown | Ctrl-R rack | Ctrl-W save | Ctrl-X quit"
     ]
 
@@ -388,7 +388,13 @@ def curses_editor(stdscr, grid, clue_map, rack):
                 elif rr == r and cc == c:
                     attr = curses.color_pair(2) if curses.has_colors() else curses.A_REVERSE
 
-                stdscr.addstr(y+rr, 5+2*cc, ch, attr)
+                draw_ch = ch
+                if ch == "#":
+                    items = clue_map.get(cell, [])
+                    if any(bool(it.get("unknown")) for it in items):
+                        draw_ch = "!"
+
+                stdscr.addstr(y+rr, 5+2*cc, draw_ch, attr)
 
         stdscr.refresh()
 
@@ -399,7 +405,7 @@ def curses_editor(stdscr, grid, clue_map, rack):
             return
         rack = normalize_rack(line)
 
-    def enter_clue():
+    def enter_clue(force_unknown=False):
         nonlocal grid
         token = grid[r][c]
         if token not in (".", "#"):
@@ -445,8 +451,12 @@ def curses_editor(stdscr, grid, clue_map, rack):
             f"{cell} clue [{dir_hint}; split E/S with '/', optional s=WORD] [{existing}]: "
             , clue_cell=(r, c)
         )
+        if not line and force_unknown:
+            line = "!"
         if not line:
             return
+        if force_unknown and "!" not in line:
+            line = "! " + line
 
         try:
             clue_map[cell] = parse_clue_entry(line, fixed)
@@ -494,12 +504,18 @@ def curses_editor(stdscr, grid, clue_map, rack):
 
         if 32 <= ch <= 126:
             s = chr(ch).upper()
-            if s in {"3", "#", "!", "1"}:
+            if s in {"3", "#"}:
                 if is_interior(r, c):
                     grid[r][c] = "#"
                     enter_clue()
                 elif grid[r][c] == "#":
                     enter_clue()
+            elif s in {"!", "1"}:
+                if is_interior(r, c):
+                    grid[r][c] = "#"
+                    enter_clue(force_unknown=True)
+                elif grid[r][c] == "#":
+                    enter_clue(force_unknown=True)
             elif s in {".", "#"} or ("A" <= s <= "Z"):
                 if is_interior(r, c):
                     grid[r][c] = s
