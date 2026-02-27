@@ -331,16 +331,31 @@ def curses_editor(stdscr, grid, clue_map, rack):
         draw()
 
         lines = wrapped_lines(prompt)
-        prompt_top = max(0, curses.LINES - len(lines))
-        for i in range(prompt_top, curses.LINES):
-            stdscr.move(i, 0)
-            stdscr.clrtoeol()
-        for i, ln in enumerate(lines):
-            y = prompt_top + i
-            if y < curses.LINES:
-                stdscr.addstr(y, 0, ln)
+        if curses.LINES >= 2:
+            input_y = curses.LINES - 1
+            prompt_cap = curses.LINES - 1
+            shown = lines[-prompt_cap:]
+            prompt_top = input_y - len(shown)
 
-        y = prompt_top + len(lines) - 1
+            for i in range(prompt_top, curses.LINES):
+                stdscr.move(i, 0)
+                stdscr.clrtoeol()
+            for i, ln in enumerate(shown):
+                y = prompt_top + i
+                if y < input_y:
+                    stdscr.addstr(y, 0, ln)
+
+            y = input_y
+            start_x = 0
+            stdscr.move(y, 0)
+            stdscr.clrtoeol()
+        else:
+            y = 0
+            stdscr.move(y, 0)
+            stdscr.clrtoeol()
+            stdscr.addstr(y, 0, lines[-1])
+            start_x = min(len(lines[-1]), ui_width())
+
         stdscr.refresh()
 
         try:
@@ -351,7 +366,6 @@ def curses_editor(stdscr, grid, clue_map, rack):
         curses.echo()
         s = ""
         try:
-            start_x = min(len(lines[-1]), ui_width())
             stdscr.move(y, start_x)
             try:
                 s = stdscr.getstr(y, start_x).decode("utf-8", errors="replace")
