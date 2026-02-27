@@ -571,6 +571,7 @@ def curses_editor(stdscr, grid, clue_map, rack):
         if ch == ord(' ') or ch in (127, 8, curses.KEY_BACKSPACE):
             if is_interior(r, c):
                 grid[r][c] = "."
+                clue_map.pop(cell_label(r, c), None)
             continue
 
         if 32 <= ch <= 126:
@@ -590,6 +591,8 @@ def curses_editor(stdscr, grid, clue_map, rack):
             elif s in {".", "#"} or ("A" <= s <= "Z"):
                 if is_interior(r, c):
                     grid[r][c] = s
+                    if s != "#":
+                        clue_map.pop(cell_label(r, c), None)
 
 
 # --------------------------------------------------
