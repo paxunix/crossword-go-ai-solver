@@ -277,6 +277,9 @@ def curses_editor(stdscr, grid, clue_map, rack):
     stdscr.keypad(True)
     prompt_cell = None
     wrap_width = 79
+    cell_w = 3
+    cell_gap = 1
+    cell_step = cell_w + cell_gap
 
     if curses.has_colors():
         curses.start_color()
@@ -400,7 +403,8 @@ def curses_editor(stdscr, grid, clue_map, rack):
 
         y += 1  # blank line
 
-        stdscr.addstr(y, 0, "     " + " ".join(COL_LABELS))
+        header = "     " + "".join(f"{c:^{cell_step}}" for c in COL_LABELS).rstrip()
+        stdscr.addstr(y, 0, header)
         y += 1
 
         for rr in range(ROWS):
@@ -418,13 +422,26 @@ def curses_editor(stdscr, grid, clue_map, rack):
                 elif rr == r and cc == c:
                     attr = curses.color_pair(2) if curses.has_colors() else curses.A_REVERSE
 
-                draw_ch = ch
+                draw_ch = f" {ch} "
                 if ch == "#":
                     items = clue_map.get(cell, [])
-                    if any(bool(it.get("unknown")) for it in items):
-                        draw_ch = "!"
+                    e_item = next((it for it in items if str(it.get("dir", "")).upper() == "E"), None)
+                    s_item = next((it for it in items if str(it.get("dir", "")).upper() == "S"), None)
 
-                stdscr.addstr(y+rr, 5+2*cc, draw_ch, attr)
+                    def clue_mark(it):
+                        if not it:
+                            return " "
+                        return "!" if bool(it.get("unknown")) else "#"
+
+                    fixed = fixed_dirs_for_cell(rr, cc)
+                    if fixed == ["E"]:
+                        draw_ch = f" {clue_mark(e_item)} "
+                    elif fixed == ["S"]:
+                        draw_ch = f" {clue_mark(s_item)} "
+                    else:
+                        draw_ch = f"{clue_mark(e_item)}/{clue_mark(s_item)}"
+
+                stdscr.addstr(y+rr, 5 + cell_step * cc, draw_ch, attr)
 
         stdscr.refresh()
 
