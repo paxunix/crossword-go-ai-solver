@@ -88,11 +88,21 @@ def format_clue_preview(items: List[dict]) -> str:
         sol = it.get("solution")
         sol = str(sol).strip().upper() if sol else ""
         unknown = bool(it.get("unknown"))
-        unk = f"!={text}" if unknown else ""
+        tags = []
         if sol:
-            base = f"{text} (s={sol})" if text else f"(s={sol})"
-            return f"{unk} {base}".strip() if unk else base
-        return unk if unk else text
+            tags.append(f"s=({sol})")
+        if unknown:
+            tags.append(f"!=({text})")
+
+        if unknown and tags:
+            return " ".join(tags)
+        if text and tags:
+            return f"{text} {' '.join(tags)}"
+        if text:
+            return text
+        if tags:
+            return " ".join(tags)
+        return ""
 
     parts = []
     if e:
