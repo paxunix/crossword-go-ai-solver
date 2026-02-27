@@ -140,11 +140,14 @@ def validate_and_normalize_state(state):
             t = str(it.get("text", ""))
             clue = {"dir": d, "text": t}
             sol = it.get("solution")
+            unknown = bool(it.get("unknown"))
+            if unknown and sol:
+                raise ValueError(f"clue {d}: unknown clue cannot also have solution")
             if sol:
                 s = str(sol).strip().upper()
                 if s and all("A" <= ch <= "Z" for ch in s):
                     clue["solution"] = s
-            if bool(it.get("unknown")):
+            if unknown:
                 clue["unknown"] = True
             out.append(clue)
         return out
@@ -227,7 +230,12 @@ def parse_clue_entry(raw, fixed_dirs):
 
     out = []
 
+    def validate_unknown_solution_pair(d, sol, unknown):
+        if unknown and sol:
+            raise ValueError(f"{d} clue cannot be unknown and solved at the same time")
+
     def add(d, t, sol, unknown):
+        validate_unknown_solution_pair(d, sol, unknown)
         item = {"dir": d, "text": t}
         if sol:
             item["solution"] = sol
