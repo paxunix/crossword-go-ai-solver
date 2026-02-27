@@ -152,6 +152,106 @@ def is_clue_complete(grid, clue_r: int, clue_c: int, clue_items: List[dict]) -> 
             return False
     return True
 
+def clue_has_solution(clue_items: List[dict]) -> bool:
+    for it in clue_items:
+        sol = str(it.get("solution", "")).strip()
+        if sol:
+            return True
+    return False
+
+def clue_item_for_dir(clue_items: List[dict], direction: str):
+    d = direction.upper()
+    return next((it for it in clue_items if str(it.get("dir", "")).upper() == d), None)
+
+def clue_dir_complete(grid, clue_r: int, clue_c: int, direction: str) -> bool:
+    cells = iter_slot_cells(grid, clue_r, clue_c, direction)
+    if not cells:
+        return True
+    return all("A" <= grid[r][c] <= "Z" for r, c in cells)
+
+def render_clue_cell_text(clue_items: List[dict], r: int, c: int) -> str:
+    e_item = clue_item_for_dir(clue_items, "E")
+    s_item = clue_item_for_dir(clue_items, "S")
+
+    def clue_mark(it):
+        if not it:
+            return " "
+        return "!" if bool(it.get("unknown")) else "#"
+
+    fixed = fixed_dirs_for_cell(r, c)
+    if fixed == ["E"]:
+        return f" {clue_mark(e_item)} "
+    if fixed == ["S"]:
+        return f" {clue_mark(s_item)} "
+    return f"{clue_mark(e_item)}/{clue_mark(s_item)}"
+
+def draw_board_cells(
+    stdscr,
+    base_y: int,
+    grid,
+    clue_map,
+    opponent_new_cells,
+    cell_step: int,
+    override_attrs: Dict[str, int],
+    move_letters: Dict[str, str],
+):
+    for rr in range(ROWS):
+        row_y = base_y + rr
+        if row_y >= curses.LINES:
+            break
+        stdscr.addstr(row_y, 0, f"{rr+1:>3}  ")
+        for cc in range(COLS):
+            cell = cell_label(rr, cc)
+            ch = grid[rr][cc]
+
+            attr = 0
+            override_cell_attr = False
+            if cell in override_attrs:
+                attr = override_attrs[cell]
+                override_cell_attr = True
+
+            if not override_cell_attr and cell in opponent_new_cells and curses.has_colors():
+                attr |= curses.color_pair(4)
+
+            draw_ch = f" {ch} "
+            if cell in move_letters:
+                draw_ch = f" {move_letters[cell]} "
+            elif ch == "#":
+                draw_ch = render_clue_cell_text(clue_map.get(cell, []), rr, cc)
+
+            x = 5 + cell_step * cc
+            if x >= curses.COLS:
+                continue
+
+            if ch == "#" and not override_cell_attr and curses.has_colors():
+                items = clue_map.get(cell, [])
+                fixed = fixed_dirs_for_cell(rr, cc)
+
+                def dir_attr(direction: str):
+                    it = clue_item_for_dir(items, direction)
+                    if not it:
+                        return attr
+                    if clue_dir_complete(grid, rr, cc, direction):
+                        return attr
+                    return curses.color_pair(6 if it.get("solution") else 1)
+
+                if fixed == ["E"]:
+                    stdscr.addstr(row_y, x, draw_ch[:max(0, curses.COLS - x)], dir_attr("E"))
+                elif fixed == ["S"]:
+                    stdscr.addstr(row_y, x, draw_ch[:max(0, curses.COLS - x)], dir_attr("S"))
+                else:
+                    parts = [
+                        (draw_ch[0], dir_attr("E")),
+                        (draw_ch[1], attr),
+                        (draw_ch[2], dir_attr("S")),
+                    ]
+                    for i, (ch_i, a_i) in enumerate(parts):
+                        xx = x + i
+                        if xx < curses.COLS:
+                            stdscr.addstr(row_y, xx, ch_i, a_i)
+            else:
+                stdscr.addstr(row_y, x, draw_ch[:max(0, curses.COLS - x)], attr)
+
 
 # --------------------------------------------------
 # JSON load/save
@@ -396,6 +496,7 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
         curses.start_color()
         curses.use_default_colors()
         curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_YELLOW)  # clue-entered highlight
+        curses.init_pair(6, curses.COLOR_BLACK, curses.COLOR_BLUE)    # clue with known solution
         curses.init_pair(2, curses.COLOR_BLACK, curses.COLOR_CYAN)    # cursor highlight
         curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_GREEN)   # active clue edit cell
         curses.init_pair(4, curses.COLOR_BLACK, curses.COLOR_MAGENTA) # opponent newly played marker
@@ -604,61 +705,34 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
 
         move_cells = set()
         move_letters = {}
+        override_attrs = {}
         if mode == "suggest" and suggest_moves:
             move_cells = {cell for cell, _ in suggest_moves[suggest_sel].placements}
             move_letters = {cell: letter for cell, letter in suggest_moves[suggest_sel].placements}
+        if mode == "suggest" and curses.has_colors():
+            for cell in move_cells:
+                override_attrs[cell] = curses.color_pair(3)
+        if mode == "edit":
+            if prompt_cell is not None:
+                pr, pc = prompt_cell
+                override_attrs[cell_label(pr, pc)] = (
+                    curses.color_pair(3) if curses.has_colors() else (curses.A_REVERSE | curses.A_BOLD)
+                )
+            else:
+                override_attrs[cell_label(r, c)] = (
+                    curses.color_pair(2) if curses.has_colors() else curses.A_REVERSE
+                )
 
-        for rr in range(ROWS):
-            if y + rr >= curses.LINES:
-                break
-            stdscr.addstr(y+rr, 0, f"{rr+1:>3}  ")
-            for cc in range(COLS):
-                ch = grid[rr][cc]
-                cell = cell_label(rr, cc)
-
-                attr = 0
-                if (
-                    ch == "#"
-                    and cell in clue_map
-                    and curses.has_colors()
-                    and not is_clue_complete(grid, rr, cc, clue_map.get(cell, []))
-                ):
-                    attr |= curses.color_pair(1)
-                if cell in opponent_new_cells and curses.has_colors():
-                    attr |= curses.color_pair(4)
-                if mode == "suggest" and cell in move_cells and curses.has_colors():
-                    attr = curses.color_pair(3)
-
-                if mode == "edit":
-                    if prompt_cell == (rr, cc):
-                        attr = curses.color_pair(3) if curses.has_colors() else (curses.A_REVERSE | curses.A_BOLD)
-                    elif rr == r and cc == c:
-                        attr = curses.color_pair(2) if curses.has_colors() else curses.A_REVERSE
-
-                draw_ch = f" {ch} "
-                if mode == "suggest" and cell in move_letters:
-                    draw_ch = f" {move_letters[cell]} "
-                elif ch == "#":
-                    items = clue_map.get(cell, [])
-                    e_item = next((it for it in items if str(it.get("dir", "")).upper() == "E"), None)
-                    s_item = next((it for it in items if str(it.get("dir", "")).upper() == "S"), None)
-
-                    def clue_mark(it):
-                        if not it:
-                            return " "
-                        return "!" if bool(it.get("unknown")) else "#"
-
-                    fixed = fixed_dirs_for_cell(rr, cc)
-                    if fixed == ["E"]:
-                        draw_ch = f" {clue_mark(e_item)} "
-                    elif fixed == ["S"]:
-                        draw_ch = f" {clue_mark(s_item)} "
-                    else:
-                        draw_ch = f"{clue_mark(e_item)}/{clue_mark(s_item)}"
-
-                x = 5 + cell_step * cc
-                if x < curses.COLS:
-                    stdscr.addstr(y+rr, x, draw_ch[:max(0, curses.COLS - x)], attr)
+        draw_board_cells(
+            stdscr=stdscr,
+            base_y=y,
+            grid=grid,
+            clue_map=clue_map,
+            opponent_new_cells=opponent_new_cells,
+            cell_step=cell_step,
+            override_attrs=override_attrs,
+            move_letters=move_letters,
+        )
 
         stdscr.refresh()
 
@@ -876,6 +950,7 @@ def curses_suggest_viewer(stdscr, grid, clue_map, rack, opponent_new_cells, move
         curses.start_color()
         curses.use_default_colors()
         curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_YELLOW)  # clue-entered highlight
+        curses.init_pair(6, curses.COLOR_BLACK, curses.COLOR_BLUE)    # clue with known solution
         curses.init_pair(2, curses.COLOR_BLACK, curses.COLOR_CYAN)    # selected move row
         curses.init_pair(4, curses.COLOR_BLACK, curses.COLOR_MAGENTA) # opponent marker
         curses.init_pair(5, curses.COLOR_BLACK, curses.COLOR_GREEN)   # suggested placements
@@ -922,53 +997,21 @@ def curses_suggest_viewer(stdscr, grid, clue_map, rack, opponent_new_cells, move
 
         move_cells = {cell for cell, _ in moves[sel].placements} if moves else set()
         move_letters = {cell: letter for cell, letter in moves[sel].placements} if moves else {}
+        override_attrs = {}
+        if curses.has_colors():
+            for cell in move_cells:
+                override_attrs[cell] = curses.color_pair(5)
 
-        for rr in range(ROWS):
-            row_y = y + rr
-            if row_y >= curses.LINES:
-                break
-            stdscr.addstr(row_y, 0, f"{rr+1:>3}  ")
-            for cc in range(COLS):
-                cell = cell_label(rr, cc)
-                ch = grid[rr][cc]
-
-                attr = 0
-                if (
-                    ch == "#"
-                    and cell in clue_map
-                    and curses.has_colors()
-                    and not is_clue_complete(grid, rr, cc, clue_map.get(cell, []))
-                ):
-                    attr |= curses.color_pair(1)
-                if cell in opponent_new_cells and curses.has_colors():
-                    attr |= curses.color_pair(4)
-                if cell in move_cells and curses.has_colors():
-                    attr = curses.color_pair(5)
-
-                draw_ch = f" {ch} "
-                if cell in move_letters:
-                    draw_ch = f" {move_letters[cell]} "
-                elif ch == "#":
-                    items = clue_map.get(cell, [])
-                    e_item = next((it for it in items if str(it.get("dir", "")).upper() == "E"), None)
-                    s_item = next((it for it in items if str(it.get("dir", "")).upper() == "S"), None)
-
-                    def clue_mark(it):
-                        if not it:
-                            return " "
-                        return "!" if bool(it.get("unknown")) else "#"
-
-                    fixed = fixed_dirs_for_cell(rr, cc)
-                    if fixed == ["E"]:
-                        draw_ch = f" {clue_mark(e_item)} "
-                    elif fixed == ["S"]:
-                        draw_ch = f" {clue_mark(s_item)} "
-                    else:
-                        draw_ch = f"{clue_mark(e_item)}/{clue_mark(s_item)}"
-
-                x = 5 + cell_step * cc
-                if x < curses.COLS:
-                    stdscr.addstr(row_y, x, draw_ch[:max(0, curses.COLS - x)], attr)
+        draw_board_cells(
+            stdscr=stdscr,
+            base_y=y,
+            grid=grid,
+            clue_map=clue_map,
+            opponent_new_cells=opponent_new_cells,
+            cell_step=cell_step,
+            override_attrs=override_attrs,
+            move_letters=move_letters,
+        )
 
         stdscr.refresh()
 

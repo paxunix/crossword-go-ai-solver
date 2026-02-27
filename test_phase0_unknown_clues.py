@@ -148,6 +148,10 @@ class UnknownClueTests(unittest.TestCase):
             grid[r][c] = ch
         self.assertTrue(cw.is_clue_complete(grid, 1, 0, [{"dir": "E", "text": "across"}]))
 
+    def test_clue_has_solution(self):
+        self.assertFalse(cw.clue_has_solution([{"dir": "E", "text": "x"}]))
+        self.assertTrue(cw.clue_has_solution([{"dir": "E", "text": "x", "solution": "EV"}]))
+
 
 if __name__ == "__main__":
     unittest.main()
