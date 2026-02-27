@@ -336,13 +336,44 @@ def curses_editor(stdscr, grid, clue_map, rack):
         except curses.error:
             pass
 
-        curses.echo()
+        s = ""
         try:
             start_x = min(len(lines[-1]), ui_width())
             stdscr.move(y, start_x)
-            s = stdscr.getstr(y, start_x).decode("utf-8", errors="replace")
+            buf = []
+            max_len = max(0, ui_width() - start_x)
+            while True:
+                try:
+                    ch = stdscr.get_wch()
+                except KeyboardInterrupt:
+                    buf = []
+                    break
+
+                if ch in ("\n", "\r") or ch == curses.KEY_ENTER:
+                    break
+                if ch == "\x1b":  # ESC cancels prompt
+                    buf = []
+                    break
+                if ch in ("\b", "\x7f") or ch == curses.KEY_BACKSPACE:
+                    if buf:
+                        buf.pop()
+                        stdscr.move(y, start_x)
+                        stdscr.clrtoeol()
+                        stdscr.addstr(y, start_x, "".join(buf))
+                        stdscr.move(y, start_x + len(buf))
+                        stdscr.refresh()
+                    continue
+
+                if isinstance(ch, str) and ch.isprintable():
+                    if len(buf) < max_len:
+                        buf.append(ch)
+                        stdscr.addstr(y, start_x + len(buf) - 1, ch)
+                        stdscr.move(y, start_x + len(buf))
+                        stdscr.refresh()
+                    continue
+
+            s = "".join(buf)
         finally:
-            curses.noecho()
             try:
                 curses.curs_set(0)
             except curses.error:
