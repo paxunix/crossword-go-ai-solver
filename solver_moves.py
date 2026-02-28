@@ -35,6 +35,11 @@ def _placement_key(placements: Tuple[Tuple[str, str], ...]) -> str:
     return ",".join(f"{cell}={letter}" for cell, letter in placements)
 
 
+def _slot_length_weight(slot_len: int) -> int:
+    # Mild scaling by slot length: 2-3 => 1, 4-5 => 2, 6-7 => 3, 8+ => 4.
+    return 1 + max(0, int(slot_len) - 2) // 2
+
+
 def _risk_penalty_for_post_grid(model, placements: Tuple[Tuple[str, str], ...]) -> int:
     post = [row[:] for row in model.grid]
     for cell, letter in placements:
@@ -43,14 +48,15 @@ def _risk_penalty_for_post_grid(model, placements: Tuple[Tuple[str, str], ...]) 
 
     penalty = 0
     for slot in model.slots:
+        slot_weight = _slot_length_weight(len(slot.cells))
         empties = 0
         for r, c in slot.cells:
             if not ("A" <= post[r][c] <= "Z"):
                 empties += 1
         if empties == 1:
-            penalty += RISK_ONE_EMPTY
+            penalty += RISK_ONE_EMPTY * slot_weight
         elif empties == 2:
-            penalty += RISK_TWO_EMPTY
+            penalty += RISK_TWO_EMPTY * slot_weight
     return penalty
 
 
