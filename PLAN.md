@@ -22,17 +22,14 @@ Implemented:
 - Move scoring (`solver_scoring.py`).
 - Deterministic forced-letter move generation (`solver_moves.py`).
 - Suggest command and interactive selection UI (standalone + integrated).
+- Risk heuristic:
+  - post-move penalties for leaving slots with 1 empty cell (high) or 2 empty cells (moderate)
+  - risk shown alongside score in suggest outputs/UI
+  - optional risk-aware sorting (`suggest --sort risk`, in-editor `S` toggle in Suggest mode)
 
 ## Next Work
 
-### 1. Risk Heuristic (Phase 6)
-- Add a separate risk metric (do not mix with legality).
-- Start with penalties for leaving:
-  - slots with 1 empty cell (high)
-  - slots with 2 empty cells (moderate)
-- Expose risk in suggest UI/list and optional risk-aware sort.
-
-### 2. Test Expansion (integration-heavy)
+### 1. Test Expansion (integration-heavy)
 - Add regression tests for integrated edit/suggest mode flow:
   - `TAB` recompute after edits/rack/clue changes
   - commit move updates rack/grid and clears opponent markers
@@ -42,7 +39,7 @@ Implemented:
   - `Esc` prompt cancel behavior
   - `Ctrl-C` no-traceback behavior
 
-### 3. Performance/Scale Safety
+### 2. Performance/Scale Safety
 - Add guardrails for move generation on dense forced states (avoid UI stalls).
 - Add optional cap/logging for candidate enumeration size.
 

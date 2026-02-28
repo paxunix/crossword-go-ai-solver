@@ -4,8 +4,11 @@ from itertools import combinations, product
 from typing import Dict, List, Tuple
 
 from solver_constraints import propagate_constraints
-from solver_model import rc_to_cell
-from solver_scoring import ScoreBreakdown, score_move
+from solver_model import cell_to_rc, rc_to_cell
+from solver_scoring import score_move
+
+RISK_ONE_EMPTY = 5
+RISK_TWO_EMPTY = 2
 
 
 @dataclass(frozen=True)
@@ -15,6 +18,7 @@ class MoveSuggestion:
     word_points: int
     bonus: int
     total: int
+    risk_penalty: int
     completed_slots: Tuple[str, ...]
 
 
@@ -31,18 +35,29 @@ def _placement_key(placements: Tuple[Tuple[str, str], ...]) -> str:
     return ",".join(f"{cell}={letter}" for cell, letter in placements)
 
 
-def _as_suggestion(score: ScoreBreakdown) -> MoveSuggestion:
-    return MoveSuggestion(
-        placements=score.placements,
-        tile_points=score.tile_points,
-        word_points=score.word_points,
-        bonus=score.bonus,
-        total=score.total,
-        completed_slots=score.completed_slots,
-    )
+def _risk_penalty_for_post_grid(model, placements: Tuple[Tuple[str, str], ...]) -> int:
+    post = [row[:] for row in model.grid]
+    for cell, letter in placements:
+        r, c = cell_to_rc(cell)
+        post[r][c] = letter
+
+    penalty = 0
+    for slot in model.slots:
+        empties = 0
+        for r, c in slot.cells:
+            if not ("A" <= post[r][c] <= "Z"):
+                empties += 1
+        if empties == 1:
+            penalty += RISK_ONE_EMPTY
+        elif empties == 2:
+            penalty += RISK_TWO_EMPTY
+    return penalty
 
 
-def generate_forced_moves(state: dict, top: int = 10) -> List[MoveSuggestion]:
+def generate_forced_moves(state: dict, top: int = 10, sort_mode: str = "score") -> List[MoveSuggestion]:
+    sort_mode = str(sort_mode or "score").strip().lower()
+    if sort_mode not in {"score", "risk"}:
+        sort_mode = "score"
     constraints = propagate_constraints(state)
     rack = _normalize_rack(state)
     rack_counts = Counter(rack)
@@ -71,7 +86,17 @@ def generate_forced_moves(state: dict, top: int = 10) -> List[MoveSuggestion]:
     seen = set()
     if not letters:
         score = score_move(state, {"placements": []})
-        suggestions.append(_as_suggestion(score))
+        suggestions.append(
+            MoveSuggestion(
+                placements=score.placements,
+                tile_points=score.tile_points,
+                word_points=score.word_points,
+                bonus=score.bonus,
+                total=score.total,
+                risk_penalty=_risk_penalty_for_post_grid(constraints.model, score.placements),
+                completed_slots=score.completed_slots,
+            )
+        )
     else:
         for picks in product(*options_per_letter):
             placements: List[Tuple[str, str]] = []
@@ -88,15 +113,36 @@ def generate_forced_moves(state: dict, top: int = 10) -> List[MoveSuggestion]:
                 state,
                 {"placements": [{"cell": c, "letter": l} for c, l in place_t]},
             )
-            suggestions.append(_as_suggestion(score))
+            suggestions.append(
+                MoveSuggestion(
+                    placements=score.placements,
+                    tile_points=score.tile_points,
+                    word_points=score.word_points,
+                    bonus=score.bonus,
+                    total=score.total,
+                    risk_penalty=_risk_penalty_for_post_grid(constraints.model, score.placements),
+                    completed_slots=score.completed_slots,
+                )
+            )
 
-    suggestions.sort(
-        key=lambda m: (
-            -m.total,
-            len(m.placements),
-            _placement_key(m.placements),
+    if sort_mode == "risk":
+        suggestions.sort(
+            key=lambda m: (
+                m.risk_penalty,
+                -m.total,
+                len(m.placements),
+                _placement_key(m.placements),
+            )
         )
-    )
+    else:
+        suggestions.sort(
+            key=lambda m: (
+                -m.total,
+                m.risk_penalty,
+                len(m.placements),
+                _placement_key(m.placements),
+            )
+        )
     if top < 0:
         top = 0
     return suggestions[:top]

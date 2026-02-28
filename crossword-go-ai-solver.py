@@ -544,6 +544,7 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
 
     r, c = 1, 1
     mode = "edit"
+    suggest_sort_mode = "score"
     suggest_moves = []
     suggest_sel = 0
     suggest_scroll = 0
@@ -582,10 +583,10 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
     def recompute_suggestions():
         nonlocal suggest_moves, suggest_sel, suggest_scroll, suggest_stale, status_msg
         try:
-            suggest_moves = generate_forced_moves(current_state_json(), top=10)
+            suggest_moves = generate_forced_moves(current_state_json(), top=10, sort_mode=suggest_sort_mode)
             suggest_sel = min(suggest_sel, max(0, len(suggest_moves) - 1))
             suggest_scroll = min(suggest_scroll, suggest_sel)
-            status_msg = f"{len(suggest_moves)} suggestion(s) ready."
+            status_msg = f"{len(suggest_moves)} suggestion(s) ready. sort={suggest_sort_mode}"
         except Exception as e:
             suggest_moves = []
             suggest_sel = 0
@@ -833,10 +834,10 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
         y = 0
 
         if mode == "suggest":
-            y = add_wrapped(y, "Suggest Mode: UP/DOWN select | ENTER apply | TAB back to edit | Ctrl-U undo last play")
+            y = add_wrapped(y, "Suggest Mode: UP/DOWN select | ENTER apply | TAB back to edit | S toggle sort | Ctrl-U undo last play")
             y = add_wrapped(y, f"Status: {status_msg}" if status_msg else "Status:")
             rack_str = "".join(rack) if rack else "(empty)"
-            y = add_wrapped(y, f"Rack: {rack_str}")
+            y = add_wrapped(y, f"Rack: {rack_str} | Sort: {suggest_sort_mode}")
 
             list_h = max(3, min(10, curses.LINES // 4))
             if suggest_sel < suggest_scroll:
@@ -851,7 +852,7 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
                     break
                 mv = suggest_moves[idx]
                 ps = ", ".join(f"{c}={l}" for c, l in mv.placements) if mv.placements else "(pass)"
-                line = f"{idx+1:>2}. {ps} | t={mv.tile_points} w={mv.word_points} b={mv.bonus} total={mv.total}"
+                line = f"{idx+1:>2}. {ps} | t={mv.tile_points} w={mv.word_points} b={mv.bonus} total={mv.total} risk={mv.risk_penalty}"
                 attr = curses.color_pair(2) if (idx == suggest_sel and curses.has_colors()) else (curses.A_REVERSE if idx == suggest_sel else 0)
                 stdscr.addstr(row_y, 0, line[:max(1, curses.COLS - 1)], attr)
 
@@ -1035,6 +1036,10 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
             continue
 
         if mode == "suggest":
+            if ch in (ord("s"), ord("S")):
+                suggest_sort_mode = "risk" if suggest_sort_mode == "score" else "score"
+                recompute_suggestions()
+                continue
             if ch == curses.KEY_UP:
                 suggest_sel = max(0, suggest_sel - 1)
                 continue
@@ -1111,7 +1116,7 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
                     status_msg = f"Set {cell_label(r, c)} to {s}."
 
 
-def curses_suggest_viewer(stdscr, grid, clue_map, rack, opponent_new_cells, moves):
+def curses_suggest_viewer(stdscr, grid, clue_map, rack, opponent_new_cells, moves, sort_mode):
     try:
         curses.set_escdelay(25)
     except Exception:
@@ -1143,7 +1148,7 @@ def curses_suggest_viewer(stdscr, grid, clue_map, rack, opponent_new_cells, move
         y += 1
 
         rack_str = "".join(rack) if rack else "(empty)"
-        stdscr.addstr(y, 0, f"Rack: {rack_str}"[:max(1, curses.COLS - 1)])
+        stdscr.addstr(y, 0, f"Rack: {rack_str} | Sort: {sort_mode}"[:max(1, curses.COLS - 1)])
         y += 1
 
         list_h = max(3, min(12, curses.LINES // 3))
@@ -1162,7 +1167,7 @@ def curses_suggest_viewer(stdscr, grid, clue_map, rack, opponent_new_cells, move
                 ps = ", ".join(f"{c}={l}" for c, l in mv.placements)
             else:
                 ps = "(pass)"
-            line = f"{idx+1:>2}. {ps} | t={mv.tile_points} w={mv.word_points} b={mv.bonus} total={mv.total}"
+            line = f"{idx+1:>2}. {ps} | t={mv.tile_points} w={mv.word_points} b={mv.bonus} total={mv.total} risk={mv.risk_penalty}"
             attr = curses.color_pair(2) if (idx == sel and curses.has_colors()) else (curses.A_REVERSE if idx == sel else 0)
             stdscr.addstr(row_y, 0, line[:max(1, curses.COLS - 1)], attr)
 
@@ -1228,6 +1233,7 @@ def main():
     p_suggest = sub.add_parser("suggest", help="Suggest deterministic forced moves")
     p_suggest.add_argument("json_path", help="Board state JSON file")
     p_suggest.add_argument("--top", type=int, default=10, help="Number of moves to show")
+    p_suggest.add_argument("--sort", choices=["score", "risk"], default="score", help="Sort by score or risk")
 
     # Backward compatibility: if first arg is not a subcommand, treat as legacy edit mode.
     argv = sys.argv[1:]
@@ -1238,21 +1244,21 @@ def main():
 
     if args.command == "suggest":
         state = load_state(args.json_path)
-        moves = generate_forced_moves(state, top=args.top)
+        moves = generate_forced_moves(state, top=args.top, sort_mode=args.sort)
 
         # Interactive TUI when attached to a terminal; fallback to text otherwise.
         if sys.stdin.isatty() and sys.stdout.isatty():
             grid, clue_map, rack, opponent_new_cells = validate_and_normalize_state(state)
             selected = curses.wrapper(
                 lambda stdscr: curses_suggest_viewer(
-                    stdscr, grid, clue_map, rack, opponent_new_cells, moves
+                    stdscr, grid, clue_map, rack, opponent_new_cells, moves, args.sort
                 )
             )
             if selected is not None:
                 mv = moves[selected]
                 ps = ", ".join(f"{c}={l}" for c, l in mv.placements) if mv.placements else "(pass)"
                 print(f"Selected: {ps}")
-                print(f"tile={mv.tile_points} word={mv.word_points} bonus={mv.bonus} total={mv.total}")
+                print(f"tile={mv.tile_points} word={mv.word_points} bonus={mv.bonus} total={mv.total} risk={mv.risk_penalty}")
                 if mv.completed_slots:
                     print(f"completed={', '.join(mv.completed_slots)}")
                 updated = apply_placements_to_state(state, mv.placements)
@@ -1268,7 +1274,7 @@ def main():
                 else:
                     ps = "(pass)"
                 print(f"{i}. {ps}")
-                print(f"   tile={mv.tile_points} word={mv.word_points} bonus={mv.bonus} total={mv.total}")
+                print(f"   tile={mv.tile_points} word={mv.word_points} bonus={mv.bonus} total={mv.total} risk={mv.risk_penalty}")
                 if mv.completed_slots:
                     print(f"   completed={', '.join(mv.completed_slots)}")
         return
