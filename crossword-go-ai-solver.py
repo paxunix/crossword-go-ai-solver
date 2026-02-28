@@ -545,6 +545,7 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
     r, c = 1, 1
     mode = "edit"
     suggest_sort_mode = "score"
+    suggest_reverse = False
     suggest_moves = []
     suggest_sel = 0
     suggest_scroll = 0
@@ -586,13 +587,19 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
             suggest_moves = generate_forced_moves(current_state_json(), top=10, sort_mode=suggest_sort_mode)
             suggest_sel = min(suggest_sel, max(0, len(suggest_moves) - 1))
             suggest_scroll = min(suggest_scroll, suggest_sel)
-            status_msg = f"{len(suggest_moves)} suggestion(s) ready. sort={suggest_sort_mode}"
+            order = "desc" if suggest_reverse else "asc"
+            status_msg = f"{len(suggest_moves)} suggestion(s) ready. sort={suggest_sort_mode} order={order}"
         except Exception as e:
             suggest_moves = []
             suggest_sel = 0
             suggest_scroll = 0
             status_msg = f"suggest error: {e}"
         suggest_stale = False
+
+    def map_display_idx_to_move_idx(display_idx: int) -> int:
+        if not suggest_reverse:
+            return display_idx
+        return len(suggest_moves) - 1 - display_idx
 
     def state_fingerprint():
         return json.dumps(build_state_json(grid, clue_map, rack, opponent_new_cells), sort_keys=True)
@@ -834,10 +841,11 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
         y = 0
 
         if mode == "suggest":
-            y = add_wrapped(y, "Suggest Mode: UP/DOWN select | ENTER apply | TAB back to edit | S toggle sort | Ctrl-U undo last play")
+            y = add_wrapped(y, "Suggest Mode: UP/DOWN select | ENTER apply | TAB back to edit | S toggle sort | ^ reverse | Ctrl-U undo last play")
             y = add_wrapped(y, f"Status: {status_msg}" if status_msg else "Status:")
             rack_str = "".join(rack) if rack else "(empty)"
-            y = add_wrapped(y, f"Rack: {rack_str} | Sort: {suggest_sort_mode}")
+            order = "desc" if suggest_reverse else "asc"
+            y = add_wrapped(y, f"Rack: {rack_str} | Sort: {suggest_sort_mode} | Order: {order}")
 
             list_h = max(3, min(10, curses.LINES // 4))
             if suggest_sel < suggest_scroll:
@@ -850,7 +858,7 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
                 row_y = y + i
                 if idx >= len(suggest_moves) or row_y >= curses.LINES:
                     break
-                mv = suggest_moves[idx]
+                mv = suggest_moves[map_display_idx_to_move_idx(idx)]
                 ps = ", ".join(f"{c}={l}" for c, l in mv.placements) if mv.placements else "(pass)"
                 line = f"{idx+1:>2}. {ps} | t={mv.tile_points} w={mv.word_points} b={mv.bonus} total={mv.total} risk={mv.risk_penalty}"
                 attr = curses.color_pair(2) if (idx == suggest_sel and curses.has_colors()) else (curses.A_REVERSE if idx == suggest_sel else 0)
@@ -890,8 +898,9 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
         move_letters = {}
         override_attrs = {}
         if mode == "suggest" and suggest_moves:
-            move_cells = {cell for cell, _ in suggest_moves[suggest_sel].placements}
-            move_letters = {cell: letter for cell, letter in suggest_moves[suggest_sel].placements}
+            current = suggest_moves[map_display_idx_to_move_idx(suggest_sel)]
+            move_cells = {cell for cell, _ in current.placements}
+            move_letters = {cell: letter for cell, letter in current.placements}
         if mode == "suggest" and curses.has_colors():
             for cell in move_cells:
                 override_attrs[cell] = curses.color_pair(3)
@@ -1040,6 +1049,13 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
                 suggest_sort_mode = "risk" if suggest_sort_mode == "score" else "score"
                 recompute_suggestions()
                 continue
+            if ch == ord("^"):
+                suggest_reverse = not suggest_reverse
+                order = "desc" if suggest_reverse else "asc"
+                status_msg = f"Suggestion order: {order}"
+                suggest_sel = min(suggest_sel, max(0, len(suggest_moves) - 1))
+                suggest_scroll = min(suggest_scroll, suggest_sel)
+                continue
             if ch == curses.KEY_UP:
                 suggest_sel = max(0, suggest_sel - 1)
                 continue
@@ -1050,7 +1066,7 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
                 if not suggest_moves:
                     status_msg = "No suggestions available."
                     continue
-                mv = suggest_moves[suggest_sel]
+                mv = suggest_moves[map_display_idx_to_move_idx(suggest_sel)]
                 undo_snapshot = snapshot_state()
                 try:
                     updated = apply_placements_to_state(current_state_json(), mv.placements)
@@ -1129,6 +1145,12 @@ def curses_suggest_viewer(stdscr, grid, clue_map, rack, opponent_new_cells, move
     cell_step = cell_w + cell_gap
     sel = 0
     scroll = 0
+    reverse_order = False
+
+    def map_display_idx_to_move_idx(display_idx: int) -> int:
+        if not reverse_order:
+            return display_idx
+        return len(moves) - 1 - display_idx
 
     if curses.has_colors():
         curses.start_color()
@@ -1144,11 +1166,12 @@ def curses_suggest_viewer(stdscr, grid, clue_map, rack, opponent_new_cells, move
         nonlocal scroll
         stdscr.erase()
         y = 0
-        stdscr.addstr(y, 0, "SUGGEST: UP/DOWN select move | ENTER accept | q/ESC quit"[:max(1, curses.COLS - 1)])
+        stdscr.addstr(y, 0, "SUGGEST: UP/DOWN select move | ENTER accept | ^ reverse | q/ESC quit"[:max(1, curses.COLS - 1)])
         y += 1
 
         rack_str = "".join(rack) if rack else "(empty)"
-        stdscr.addstr(y, 0, f"Rack: {rack_str} | Sort: {sort_mode}"[:max(1, curses.COLS - 1)])
+        order = "desc" if reverse_order else "asc"
+        stdscr.addstr(y, 0, f"Rack: {rack_str} | Sort: {sort_mode} | Order: {order}"[:max(1, curses.COLS - 1)])
         y += 1
 
         list_h = max(3, min(12, curses.LINES // 3))
@@ -1162,7 +1185,7 @@ def curses_suggest_viewer(stdscr, grid, clue_map, rack, opponent_new_cells, move
             row_y = y + i
             if idx >= len(moves) or row_y >= curses.LINES:
                 break
-            mv = moves[idx]
+            mv = moves[map_display_idx_to_move_idx(idx)]
             if mv.placements:
                 ps = ", ".join(f"{c}={l}" for c, l in mv.placements)
             else:
@@ -1181,8 +1204,9 @@ def curses_suggest_viewer(stdscr, grid, clue_map, rack, opponent_new_cells, move
         stdscr.addstr(y, 0, header[:max(1, curses.COLS - 1)])
         y += 1
 
-        move_cells = {cell for cell, _ in moves[sel].placements} if moves else set()
-        move_letters = {cell: letter for cell, letter in moves[sel].placements} if moves else {}
+        current = moves[map_display_idx_to_move_idx(sel)] if moves else None
+        move_cells = {cell for cell, _ in current.placements} if current else set()
+        move_letters = {cell: letter for cell, letter in current.placements} if current else {}
         override_attrs = {}
         if curses.has_colors():
             for cell in move_cells:
@@ -1209,8 +1233,13 @@ def curses_suggest_viewer(stdscr, grid, clue_map, rack, opponent_new_cells, move
             return None
         if ch in (ord("q"), 27):
             return None
+        if ch == ord("^"):
+            reverse_order = not reverse_order
+            sel = min(sel, max(0, len(moves) - 1))
+            scroll = min(scroll, sel)
+            continue
         if ch in (10, 13, curses.KEY_ENTER):
-            return sel
+            return map_display_idx_to_move_idx(sel)
         if ch == curses.KEY_UP:
             sel = max(0, sel - 1)
             continue
