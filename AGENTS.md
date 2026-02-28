@@ -351,6 +351,14 @@ Phase 1 policy:
 
 This prevents speculative illegal moves.
 
+Risk model policy:
+- Risk is a blended metric, not legality:
+  - structural risk (near-complete slots left open)
+  - estimated opponent next-turn expected score (`opponent_EV`)
+- Blend weight is confidence-driven from current board knowledge
+  (forced-letter coverage + opponent metadata quality).
+- On highly solved boards, `opponent_EV` should dominate.
+
 ---
 
 # 9. Non-Goals (for now)

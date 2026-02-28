@@ -38,7 +38,9 @@ Minimal repo invariants. Use this as a hard contract for solver/editor changes.
 - Phase A suggestions must be non-speculative:
   - only place forced letters.
 - Suggestion ordering must be deterministic and stable.
-- Keep legality, score, and any future risk heuristic as separate concepts.
+- Keep legality, score, and risk as separate concepts.
+- Risk may blend structural heuristics with opponent expected-value estimates,
+  but must remain deterministic for identical input state.
 
 ## 6) Separation of Concerns
 - Core game/solver logic stays out of curses UI.

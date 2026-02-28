@@ -24,6 +24,8 @@ Implemented:
 - Suggest command and interactive selection UI (standalone + integrated).
 - Risk heuristic:
   - post-move penalties for leaving slots with 1 empty cell (high) or 2 empty cells (moderate)
+  - blended with estimated opponent next-turn expected score using confidence weighting
+  - uses known forced letters, current rack, remaining inferred pool, and opponent metadata confidence
   - risk shown alongside score in suggest outputs/UI
   - optional risk-aware sorting (`suggest --sort risk`, in-editor `S` toggle in Suggest mode)
 

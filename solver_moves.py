@@ -1,6 +1,7 @@
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from itertools import combinations, product
+from math import comb
 from typing import Dict, List, Tuple
 
 from solver_constraints import propagate_constraints
@@ -40,7 +41,7 @@ def _slot_length_weight(slot_len: int) -> int:
     return 1 + max(0, int(slot_len) - 2) // 2
 
 
-def _risk_penalty_for_post_grid(model, placements: Tuple[Tuple[str, str], ...]) -> int:
+def _structural_risk_for_post_grid(model, placements: Tuple[Tuple[str, str], ...]) -> int:
     post = [row[:] for row in model.grid]
     for cell, letter in placements:
         r, c = cell_to_rc(cell)
@@ -58,6 +59,146 @@ def _risk_penalty_for_post_grid(model, placements: Tuple[Tuple[str, str], ...]) 
         elif empties == 2:
             penalty += RISK_TWO_EMPTY * slot_weight
     return penalty
+
+
+def _post_move_rack(start_rack: List[str], placements: Tuple[Tuple[str, str], ...]) -> List[str]:
+    counts = Counter(start_rack)
+    for _, letter in placements:
+        if counts[letter] > 0:
+            counts[letter] -= 1
+    out: List[str] = []
+    for ch in start_rack:
+        if counts[ch] > 0:
+            out.append(ch)
+            counts[ch] -= 1
+    return out
+
+
+def _hypergeom_prob_at_least(pool: Counter, draws: int, needed: Counter) -> float:
+    req_letters = [ch for ch, n in needed.items() if n > 0]
+    need_total = sum(needed[ch] for ch in req_letters)
+    pool_total = sum(pool.values())
+    if need_total == 0:
+        return 1.0
+    if draws < need_total or pool_total < draws:
+        return 0.0
+    for ch in req_letters:
+        if pool.get(ch, 0) < needed[ch]:
+            return 0.0
+
+    total_ways = comb(pool_total, draws)
+    if total_ways == 0:
+        return 0.0
+
+    req_pool_total = sum(pool[ch] for ch in req_letters)
+    other_pool = pool_total - req_pool_total
+    favorable = 0
+
+    # Enumerate draw counts for required letters with lower bounds.
+    alloc = [0] * len(req_letters)
+
+    def rec(i: int, used: int, ways_mul: int):
+        nonlocal favorable
+        if i == len(req_letters):
+            rem = draws - used
+            if 0 <= rem <= other_pool:
+                favorable += ways_mul * comb(other_pool, rem)
+            return
+        ch = req_letters[i]
+        min_k = needed[ch]
+        max_k = min(pool[ch], draws - used)
+        for k in range(min_k, max_k + 1):
+            alloc[i] = k
+            rec(i + 1, used + k, ways_mul * comb(pool[ch], k))
+
+    rec(0, 0, 1)
+    return favorable / total_ways
+
+
+def _opponent_draw_pool_counts(constraints, post_grid: List[List[str]], my_post_rack: List[str]) -> Counter:
+    # Approximate remaining draw pool as forced letters still unfilled after our move,
+    # minus the letters currently known in our rack.
+    need = Counter()
+    for (r, c), ch in constraints.forced_letters.items():
+        if post_grid[r][c] == ".":
+            need[ch] += 1
+
+    my_counts = Counter(my_post_rack)
+    for ch, n in my_counts.items():
+        if n > 0:
+            need[ch] = max(0, need[ch] - n)
+            if need[ch] == 0:
+                need.pop(ch, None)
+    return need
+
+
+def _confidence_for_post_grid(constraints, post_grid: List[List[str]], state: dict) -> float:
+    total_open = 0
+    forced_open = 0
+    for r in range(1, len(post_grid)):
+        for c in range(1, len(post_grid[r])):
+            if post_grid[r][c] != ".":
+                continue
+            total_open += 1
+            if (r, c) in constraints.forced_letters:
+                forced_open += 1
+    forced_ratio = 1.0 if total_open == 0 else (forced_open / total_open)
+
+    # Opponent metadata quality: if user marked last-play cells, pool-based inference
+    # is slightly more trustworthy; otherwise keep confidence mostly unchanged.
+    hist = state.get("opponent_new_cells")
+    if isinstance(hist, list):
+        hist_n = sum(1 for x in hist if isinstance(x, str) and x.strip())
+        history_factor = 0.85 + 0.15 * min(5, hist_n) / 5.0
+    else:
+        history_factor = 1.0
+    return max(0.0, min(1.0, forced_ratio * history_factor))
+
+
+def _opponent_one_turn_ev(constraints, post_grid: List[List[str]], my_post_rack: List[str]) -> float:
+    pool = _opponent_draw_pool_counts(constraints, post_grid, my_post_rack)
+    pool_total = sum(pool.values())
+    draws = min(5, pool_total)
+    if draws <= 0:
+        return 0.0
+
+    ev = 0.0
+    for slot in constraints.model.slots:
+        empties = []
+        for r, c in slot.cells:
+            if post_grid[r][c] == ".":
+                empties.append((r, c))
+        if not empties or len(empties) > 5:
+            continue
+        if any(rc not in constraints.forced_letters for rc in empties):
+            continue
+
+        need = Counter(constraints.forced_letters[rc] for rc in empties)
+        p_complete = _hypergeom_prob_at_least(pool, draws, need)
+        if p_complete <= 0.0:
+            continue
+
+        # Approximate one-turn value: slot completion points + tile placements.
+        slot_value = slot.length + len(empties)
+        if len(empties) == 5:
+            slot_value += 5  # potential rack-empty bonus
+        ev += p_complete * slot_value
+    return ev
+
+
+def _blended_risk_penalty(state: dict, constraints, start_rack: List[str], placements: Tuple[Tuple[str, str], ...]) -> int:
+    post_grid = [row[:] for row in constraints.model.grid]
+    for cell, letter in placements:
+        r, c = cell_to_rc(cell)
+        post_grid[r][c] = letter
+
+    structural = _structural_risk_for_post_grid(constraints.model, placements)
+    my_post_rack = _post_move_rack(start_rack, placements)
+    opponent_ev = _opponent_one_turn_ev(constraints, post_grid, my_post_rack)
+    confidence = _confidence_for_post_grid(constraints, post_grid, state)
+
+    blended = confidence * opponent_ev + (1.0 - confidence) * structural
+    return int(round(blended))
 
 
 def generate_forced_moves(state: dict, top: int = 10, sort_mode: str = "score") -> List[MoveSuggestion]:
@@ -99,7 +240,7 @@ def generate_forced_moves(state: dict, top: int = 10, sort_mode: str = "score") 
                 word_points=score.word_points,
                 bonus=score.bonus,
                 total=score.total,
-                risk_penalty=_risk_penalty_for_post_grid(constraints.model, score.placements),
+                risk_penalty=_blended_risk_penalty(state, constraints, rack, score.placements),
                 completed_slots=score.completed_slots,
             )
         )
@@ -126,7 +267,7 @@ def generate_forced_moves(state: dict, top: int = 10, sort_mode: str = "score") 
                     word_points=score.word_points,
                     bonus=score.bonus,
                     total=score.total,
-                    risk_penalty=_risk_penalty_for_post_grid(constraints.model, score.placements),
+                    risk_penalty=_blended_risk_penalty(state, constraints, rack, score.placements),
                     completed_slots=score.completed_slots,
                 )
             )
