@@ -275,7 +275,7 @@ def generate_forced_moves(state: dict, top: int = 10, sort_mode: str = "score") 
     if sort_mode == "risk":
         suggestions.sort(
             key=lambda m: (
-                m.risk_penalty,
+                -m.risk_penalty,
                 -m.total,
                 len(m.placements),
                 _placement_key(m.placements),
