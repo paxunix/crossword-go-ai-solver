@@ -7,6 +7,12 @@ working on this repo.
 
 The goal is deterministic, testable tooling — NOT prompt-only reasoning.
 
+Before implementing any code change, read `INVARIANTS.md` when the work touches:
+- board/token normalization
+- clue parsing/representation
+- solver model/constraints/scoring/move generation
+- JSON contract or editor state transitions
+
 ---
 
 # 1. Game Rules (Authoritative)
@@ -397,3 +403,26 @@ Phase C:
 
 Phase D:
 - full move optimizer
+
+---
+
+# 13. Test + Validation Workflow
+
+Use lightweight validation by default, and full suite when solver logic changes.
+
+## Fast smoke checks (run for most edits)
+
+- Syntax check:
+  - `python3 -m py_compile crossword-go-ai-solver.py solver_model.py solver_constraints.py solver_scoring.py solver_moves.py`
+- Quick core tests:
+  - `python3 -m unittest -v test_solver_moves.py`
+
+## Full regression suite (required for solver/model/scoring/constraint changes)
+
+- `python3 -m unittest -v test_solver_model.py test_solver_constraints.py test_solver_scoring.py test_solver_moves.py test_phase0_unknown_clues.py`
+
+## When to run what
+
+- UI-only changes (drawing, keybindings, prompt UX): smoke checks are sufficient unless behavior touches state/normalization/scoring.
+- Parser/normalization or JSON contract changes: run full regression suite.
+- Constraint/scoring/move-ranking/risk changes: run full regression suite.

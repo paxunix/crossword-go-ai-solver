@@ -43,3 +43,6 @@ Minimal repo invariants. Use this as a hard contract for solver/editor changes.
 ## 6) Separation of Concerns
 - Core game/solver logic stays out of curses UI.
 - JSON state is the integration contract between editor and solver modules.
+
+## 7) Validation Gate
+- Any change to solver behavior (model, constraints, scoring, move generation) must keep the regression test suite passing.
