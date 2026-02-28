@@ -718,6 +718,13 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
                 except KeyboardInterrupt:
                     cancelled = True
                     break
+                except curses.error as e:
+                    # Some terminals can briefly report "no input" right after Ctrl-C.
+                    if "no input" in str(e).lower():
+                        curses.napms(10)
+                        continue
+                    cancelled = True
+                    break
 
                 # Enter accepts.
                 if ch in ("\n", "\r") or ch == curses.KEY_ENTER:
@@ -1164,7 +1171,10 @@ def curses_suggest_viewer(stdscr, grid, clue_map, rack, opponent_new_cells, move
 
     while True:
         draw()
-        ch = stdscr.getch()
+        try:
+            ch = stdscr.getch()
+        except KeyboardInterrupt:
+            return None
         if ch in (ord("q"), 27):
             return None
         if ch in (10, 13, curses.KEY_ENTER):
@@ -1273,4 +1283,7 @@ def main():
         print(f"\nSaved: {json_path}", file=sys.stderr)
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nCancelled.", file=sys.stderr)
