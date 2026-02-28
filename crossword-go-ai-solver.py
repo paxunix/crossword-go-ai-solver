@@ -520,6 +520,10 @@ def parse_clue_entry(raw, fixed_dirs):
 # --------------------------------------------------
 
 def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=None):
+    try:
+        curses.set_escdelay(25)
+    except Exception:
+        pass
     curses.curs_set(0)
     stdscr.keypad(True)
     prompt_cell = None
@@ -629,7 +633,7 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
             y += 1
         return y
 
-    def prompt_line(prompt, clue_cell=None):
+    def prompt_line(prompt, clue_cell=None, initial_text=""):
         nonlocal prompt_cell
         prompt_cell = clue_cell
         draw()
@@ -667,22 +671,127 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
         except curses.error:
             pass
 
-        curses.echo()
-        s = ""
+        curses.noecho()
+        text = str(initial_text)
+        buf = list(text)
+        cur = len(buf)
+        cancelled = False
         try:
-            stdscr.move(y, start_x)
-            try:
-                s = stdscr.getstr(y, start_x).decode("utf-8", errors="replace")
-            except KeyboardInterrupt:
-                s = ""
+            max_len = max(1, ui_width() - start_x)
+            view_start = 0
+
+            def move_word_left():
+                nonlocal cur
+                while cur > 0 and buf[cur - 1].isspace():
+                    cur -= 1
+                while cur > 0 and not buf[cur - 1].isspace():
+                    cur -= 1
+
+            def move_word_right():
+                nonlocal cur
+                n = len(buf)
+                while cur < n and buf[cur].isspace():
+                    cur += 1
+                while cur < n and not buf[cur].isspace():
+                    cur += 1
+
+            def redraw_input():
+                nonlocal view_start
+                if cur < view_start:
+                    view_start = cur
+                elif cur > view_start + max_len:
+                    view_start = cur - max_len
+
+                shown = "".join(buf[view_start:view_start + max_len])
+                stdscr.move(y, start_x)
+                stdscr.clrtoeol()
+                stdscr.addstr(y, start_x, shown)
+                cx = start_x + (cur - view_start)
+                cx = max(start_x, min(start_x + max_len, cx))
+                stdscr.move(y, cx)
+                stdscr.refresh()
+
+            redraw_input()
+            while True:
+                try:
+                    ch = stdscr.get_wch()
+                except KeyboardInterrupt:
+                    cancelled = True
+                    break
+
+                # Enter accepts.
+                if ch in ("\n", "\r") or ch == curses.KEY_ENTER:
+                    break
+
+                # ESC cancels without changes.
+                if ch == "\x1b" or ch == 27:
+                    cancelled = True
+                    break
+
+                # Navigation keys.
+                if ch == curses.KEY_LEFT or ch == "\x02":  # Ctrl-B
+                    if cur > 0:
+                        cur -= 1
+                    redraw_input()
+                    continue
+                if ch == curses.KEY_RIGHT or ch == "\x06":  # Ctrl-F
+                    if cur < len(buf):
+                        cur += 1
+                    redraw_input()
+                    continue
+                if ch in (
+                    getattr(curses, "KEY_SLEFT", -1),
+                    getattr(curses, "KEY_CTRL_LEFT", -1),
+                    getattr(curses, "KEY_CLEFT", -1),
+                ):
+                    move_word_left()
+                    redraw_input()
+                    continue
+                if ch in (
+                    getattr(curses, "KEY_SRIGHT", -1),
+                    getattr(curses, "KEY_CTRL_RIGHT", -1),
+                    getattr(curses, "KEY_CRIGHT", -1),
+                ):
+                    move_word_right()
+                    redraw_input()
+                    continue
+                if ch == curses.KEY_HOME or ch == "\x01":  # Ctrl-A
+                    cur = 0
+                    redraw_input()
+                    continue
+                if ch == curses.KEY_END or ch == "\x05":  # Ctrl-E
+                    cur = len(buf)
+                    redraw_input()
+                    continue
+
+                # Deletion keys.
+                if ch in ("\b", "\x7f") or ch == curses.KEY_BACKSPACE:
+                    if cur > 0:
+                        del buf[cur - 1]
+                        cur -= 1
+                    redraw_input()
+                    continue
+                if ch == curses.KEY_DC:
+                    if cur < len(buf):
+                        del buf[cur]
+                    redraw_input()
+                    continue
+
+                # Printable text inserts at cursor.
+                if isinstance(ch, str) and ch.isprintable():
+                    buf.insert(cur, ch)
+                    cur += 1
+                    redraw_input()
+                    continue
         finally:
-            curses.noecho()
             try:
                 curses.curs_set(0)
             except curses.error:
                 pass
             prompt_cell = None
-        return s.strip()
+        if cancelled:
+            return ""
+        return "".join(buf).strip()
 
     def draw():
         nonlocal suggest_scroll
@@ -830,8 +939,9 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
             dir_hint = "dir: E/S"
 
         line = prompt_line(
-            f"{cell} clue [{dir_hint}; split E/S with '/', optional s=WORD, !=HINT] [{existing}]: "
-            , clue_cell=(r, c)
+            f"{cell} clue [{dir_hint}; split E/S with '/', optional s=WORD, !=HINT]: ",
+            clue_cell=(r, c),
+            initial_text=existing,
         )
         if not line:
             return
@@ -976,6 +1086,10 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
 
 
 def curses_suggest_viewer(stdscr, grid, clue_map, rack, opponent_new_cells, moves):
+    try:
+        curses.set_escdelay(25)
+    except Exception:
+        pass
     curses.curs_set(0)
     stdscr.keypad(True)
 
