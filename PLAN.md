@@ -5,45 +5,46 @@ This document tracks remaining work only.
 ## Current Status
 
 Implemented:
-- Editor with in-session `TAB` suggest mode and one-step undo (`Ctrl-U`).
-- JSON load/save, clue/rack editing, unknown clue support (`!=...`), opponent marker metadata.
+- Editor-first loop:
+  - edit board/rack/clues
+  - `TAB` to in-session suggestions
+  - commit suggested move in-session
+  - continue editing for opponent turn
+- One-step undo of committed suggestion (`Ctrl-U`).
+- Save/output controls:
+  - `Ctrl-W` save in-place
+  - `Ctrl-O` output/dump and exit
+  - `Ctrl-X` quit with single-key unsaved prompt (`s/d/c/Esc`)
+- JSON load/save with clue metadata and opponent marker metadata.
+- Clue parsing supports directional `s=...` and `!=...`.
 - Board model extraction (`solver_model.py`).
 - Constraint propagation (`solver_constraints.py`).
 - Move scoring (`solver_scoring.py`).
 - Deterministic forced-letter move generation (`solver_moves.py`).
-- Suggest command and interactive selection UI.
+- Suggest command and interactive selection UI (standalone + integrated).
 
 ## Next Work
 
 ### 1. Risk Heuristic (Phase 6)
-- Add a separate risk score (do not mix into legality).
+- Add a separate risk metric (do not mix with legality).
 - Start with penalties for leaving:
   - slots with 1 empty cell (high)
   - slots with 2 empty cells (moderate)
-- Show both `total` and `risk` in suggest UI/list.
-- Add deterministic tie-breaking with risk as an explicit key.
+- Expose risk in suggest UI/list and optional risk-aware sort.
 
-### 2. Suggest Quality / UX Refinement
-- Add optional sort modes:
-  - score-first (default)
-  - risk-aware
-- Improve suggest panel readability for long placement lists (compact rendering / truncation).
-- Optional: show why a move is legal (forced cells source).
-
-### 3. CLI Contract Hardening
-- Add a stable machine-readable suggest output mode (`--json`).
-- Include full breakdown fields in JSON output.
-- Keep text output deterministic and human-friendly.
-
-### 4. Test Expansion
+### 2. Test Expansion (integration-heavy)
 - Add regression tests for integrated edit/suggest mode flow:
-  - `TAB` recompute after edits
+  - `TAB` recompute after edits/rack/clue changes
   - commit move updates rack/grid and clears opponent markers
   - `Ctrl-U` undo restores exact prior state
-- Add move-generation edge cases:
-  - duplicate rack letters
-  - zero legal forced placements
-  - pass move handling
+- Add prompt/editor control regressions:
+  - single-key unsaved prompt behavior
+  - `Esc` prompt cancel behavior
+  - `Ctrl-C` no-traceback behavior
+
+### 3. Performance/Scale Safety
+- Add guardrails for move generation on dense forced states (avoid UI stalls).
+- Add optional cap/logging for candidate enumeration size.
 
 ## Not In Scope (for now)
 - NLP clue solving.
