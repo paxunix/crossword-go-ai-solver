@@ -602,8 +602,35 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
         nonlocal status_msg
         if state_fingerprint() == initial_fp:
             raise KeyboardInterrupt()
-        ans = prompt_line("Unsaved changes. Save before exit? [s]ave/[d]iscard/[c]ancel: ").lower()
-        if ans.startswith("s"):
+        # Single-key confirm prompt (no Enter required).
+        draw()
+        y = max(0, curses.LINES - 1)
+        stdscr.move(y, 0)
+        stdscr.clrtoeol()
+        msg = "Unsaved changes. Save before exit? [s]ave/[d]iscard/[c]ancel (Esc=cancel): "
+        stdscr.addstr(y, 0, msg[:max(1, curses.COLS - 1)])
+        stdscr.refresh()
+        ans = ""
+        while True:
+            try:
+                ch = stdscr.get_wch()
+            except KeyboardInterrupt:
+                ch = "c"
+            except curses.error as e:
+                if "no input" in str(e).lower():
+                    curses.napms(10)
+                    continue
+                ch = "c"
+            if ch == "\x1b" or ch == 27:
+                ans = "c"
+                break
+            if isinstance(ch, str):
+                key = ch.lower()
+                if key in {"s", "d", "c"}:
+                    ans = key
+                    break
+
+        if ans == "s":
             try:
                 save_state_file(save_path, grid, clue_map, rack, opponent_new_cells)
                 status_msg = f"Saved: {save_path}"
@@ -611,7 +638,7 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
             except Exception as e:
                 status_msg = f"Save failed: {e}"
                 return False
-        if ans.startswith("d"):
+        if ans == "d":
             raise KeyboardInterrupt()
         return False
 
