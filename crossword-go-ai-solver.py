@@ -552,7 +552,7 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
     undo_snapshot = None
 
     help_lines = [
-        "ARROWS move | A-Z letter | 3/# clue | !/1 unknown clue | *=toggle opp marker | TAB suggest",
+        "ARROWS move | A-Z letter | 3/# clue | *=toggle opp marker | TAB suggest",
         "ENTER: '.'->'#'+clue, '#' edit clue | clue text: use !=HINT | Ctrl-U undo | Ctrl-R rack | Ctrl-W save | Ctrl-O output | Ctrl-X quit"
     ]
 
@@ -893,7 +893,7 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
         suggest_stale = True
         status_msg = "Rack updated."
 
-    def enter_clue(force_unknown=False):
+    def enter_clue():
         nonlocal grid, suggest_stale, status_msg
         token = grid[r][c]
         if token not in (".", "#"):
@@ -1056,14 +1056,6 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
                     suggest_stale = True
                 elif grid[r][c] == "#":
                     enter_clue()
-            elif s in {"!", "1"}:
-                if is_interior(r, c):
-                    grid[r][c] = "#"
-                    opponent_new_cells.discard(cell_label(r, c))
-                    enter_clue(force_unknown=True)
-                    suggest_stale = True
-                elif grid[r][c] == "#":
-                    enter_clue(force_unknown=True)
             elif s == "*":
                 if is_interior(r, c):
                     cell = cell_label(r, c)
