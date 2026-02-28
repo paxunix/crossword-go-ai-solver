@@ -434,3 +434,11 @@ Use lightweight validation by default, and full suite when solver logic changes.
 - UI-only changes (drawing, keybindings, prompt UX): smoke checks are sufficient unless behavior touches state/normalization/scoring.
 - Parser/normalization or JSON contract changes: run full regression suite.
 - Constraint/scoring/move-ranking/risk changes: run full regression suite.
+
+## Change Summaries (Agent Output Rule)
+
+- When summarizing a completed set of changes, always include a markdown block suitable for a git commit message.
+- Prefer structure:
+  - short title line
+  - `## Summary`
+  - `## Validation`
