@@ -72,10 +72,16 @@ Grid tokens:
 
 ## Tile mechanics
 
-- Players have up to **5 tiles** in rack.
+- Players have up to **5 tiles** in rack, or **6** when one tile is joker (`?`).
 - On a turn, player may place 0–5 tiles.
 - Tiles can be placed anywhere legal.
 - No adjacency restrictions.
+
+Special tiles:
+- `?` (joker) is a wildcard rack tile.
+- Joker can stand for any valid placed letter.
+- Joker still scores `+1` as a placed tile.
+- If joker is in rack, it must be played that turn.
 
 ### Valid placement
 
@@ -177,9 +183,12 @@ Always:
 
 ### rack
 
-Array of 0–5 uppercase letters.
+Array of 0–5 rack tile tokens, or up to 6 when one token is `?`.
 
 Represents current player rack.
+Allowed tokens:
+- `A`-`Z` normal tiles
+- `?` joker
 
 ---
 

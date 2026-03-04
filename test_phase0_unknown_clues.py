@@ -138,6 +138,38 @@ class UnknownClueTests(unittest.TestCase):
         self.assertEqual(out["rack"], ["C"])
         self.assertEqual(out["opponent_new_cells"], [])
 
+    def test_apply_placements_consumes_joker(self):
+        grid = cw.make_initial_grid()
+        state = {
+            "grid": grid,
+            "rack": ["?", "A"],
+            "clues": [],
+            "opponent_new_cells": [],
+        }
+        out = cw.apply_placements_to_state(state, [("B2", "Z")])
+        self.assertEqual(out["grid"][1][1], "Z")
+        self.assertEqual(out["rack"], ["A"])
+
+    def test_joker_question_mark_roundtrip_persists(self):
+        grid = cw.make_initial_grid()
+        state = {"grid": grid, "rack": ["?"], "clues": []}
+        ng, clue_map, rack, opp = cw.validate_and_normalize_state(state)
+        self.assertEqual(rack, ["?"])
+        out = cw.build_state_json(ng, clue_map, rack, opp)
+        self.assertEqual(out["rack"], ["?"])
+
+    def test_rack_allows_six_with_joker(self):
+        grid = cw.make_initial_grid()
+        state = {"grid": grid, "rack": ["A", "B", "C", "D", "E", "?"], "clues": []}
+        _, _, rack, _ = cw.validate_and_normalize_state(state)
+        self.assertEqual(rack, ["A", "B", "C", "D", "E", "?"])
+
+    def test_rack_without_joker_truncates_to_five(self):
+        grid = cw.make_initial_grid()
+        state = {"grid": grid, "rack": ["A", "B", "C", "D", "E", "F"], "clues": []}
+        _, _, rack, _ = cw.validate_and_normalize_state(state)
+        self.assertEqual(rack, ["A", "B", "C", "D", "E"])
+
     def test_is_clue_complete(self):
         grid = cw.make_initial_grid()
         # A2:E spans B2..H2

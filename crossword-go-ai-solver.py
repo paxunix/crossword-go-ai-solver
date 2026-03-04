@@ -8,6 +8,7 @@ import textwrap
 from typing import Dict, List, Set
 
 from solver_moves import generate_forced_moves
+from tile_rules import consume_rack_for_letters, normalize_rack_items, normalize_rack_text
 
 ROWS = 10
 COLS = 8
@@ -65,9 +66,7 @@ def normalize_grid_token(tok: str) -> str:
     raise ValueError(f"Invalid token {tok}")
 
 def normalize_rack(raw: str) -> List[str]:
-    s = raw.strip().upper()
-    letters = [ch for ch in s if "A" <= ch <= "Z"]
-    return letters[:5]
+    return normalize_rack_text(raw)
 
 def grid_to_pretty_text(grid):
     lines = ["     " + " ".join(COL_LABELS)]
@@ -351,13 +350,7 @@ def validate_and_normalize_state(state):
         clue_map[str(cell).strip().upper()] = normalize_clue_items(entry.get("clues", []))
 
     rack_raw = state.get("rack", [])
-    rack = []
-    if isinstance(rack_raw, list):
-        for x in rack_raw:
-            sx = str(x).strip().upper()
-            if len(sx) == 1 and "A" <= sx <= "Z":
-                rack.append(sx)
-    rack = rack[:5]
+    rack = normalize_rack_items(rack_raw if isinstance(rack_raw, list) else [])
 
     opponent_new_cells: Set[str] = set()
     for cell in state.get("opponent_new_cells", []):
@@ -397,19 +390,21 @@ def build_state_json(grid, clue_map, rack, opponent_new_cells):
 def apply_placements_to_state(state, placements):
     grid, clue_map, rack, _ = validate_and_normalize_state(state)
 
-    rack_remaining = rack[:]
-    for cell, letter in placements:
-        if letter in rack_remaining:
-            rack_remaining.remove(letter)
-        else:
-            raise ValueError(f"Selected move uses unavailable rack letter: {letter}")
+    placed_letters = []
+    for _, letter in placements:
+        lt = str(letter).strip().upper()
+        if len(lt) != 1 or not ("A" <= lt <= "Z"):
+            raise ValueError(f"Selected move has invalid letter: {letter}")
+        placed_letters.append(lt)
+    rack_remaining = consume_rack_for_letters(rack, placed_letters, enforce_special_rules=True)
 
+    for cell, letter in placements:
         rc = cell.strip().upper()
         r = int(rc[1:]) - 1
         c = COL_LABELS.index(rc[0])
         if grid[r][c] != ".":
             raise ValueError(f"Selected move targets non-empty cell: {cell}")
-        grid[r][c] = letter
+        grid[r][c] = str(letter).strip().upper()
 
     # Once player accepts a move, prior opponent markers no longer apply.
     opponent_new_cells = set()
@@ -859,7 +854,11 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
                 if idx >= len(suggest_moves) or row_y >= curses.LINES:
                     break
                 mv = suggest_moves[map_display_idx_to_move_idx(idx)]
-                ps = ", ".join(f"{c}={l}" for c, l in mv.placements) if mv.placements else "(pass)"
+                joker_cells = set(mv.joker_cells)
+                ps = ", ".join(
+                    (f"{c}=?->{l}" if c in joker_cells else f"{c}={l}")
+                    for c, l in mv.placements
+                ) if mv.placements else "(pass)"
                 line = f"{idx+1:>2}. {ps} | t={mv.tile_points} w={mv.word_points} b={mv.bonus} total={mv.total} risk={mv.risk_penalty}"
                 attr = curses.color_pair(2) if (idx == suggest_sel and curses.has_colors()) else (curses.A_REVERSE if idx == suggest_sel else 0)
                 stdscr.addstr(row_y, 0, line[:max(1, curses.COLS - 1)], attr)
@@ -930,7 +929,7 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
 
     def edit_rack():
         nonlocal rack, suggest_stale, status_msg
-        line = prompt_line("Enter rack letters (e.g. ABCDE or A B C D E), max 5: ")
+        line = prompt_line("Enter rack tiles (A-Z and ? for joker), max 5 (or 6 with ?): ")
         if not line:
             return
         rack = normalize_rack(line)
@@ -1187,7 +1186,11 @@ def curses_suggest_viewer(stdscr, grid, clue_map, rack, opponent_new_cells, move
                 break
             mv = moves[map_display_idx_to_move_idx(idx)]
             if mv.placements:
-                ps = ", ".join(f"{c}={l}" for c, l in mv.placements)
+                joker_cells = set(mv.joker_cells)
+                ps = ", ".join(
+                    (f"{c}=?->{l}" if c in joker_cells else f"{c}={l}")
+                    for c, l in mv.placements
+                )
             else:
                 ps = "(pass)"
             line = f"{idx+1:>2}. {ps} | t={mv.tile_points} w={mv.word_points} b={mv.bonus} total={mv.total} risk={mv.risk_penalty}"
@@ -1285,7 +1288,11 @@ def main():
             )
             if selected is not None:
                 mv = moves[selected]
-                ps = ", ".join(f"{c}={l}" for c, l in mv.placements) if mv.placements else "(pass)"
+                joker_cells = set(mv.joker_cells)
+                ps = ", ".join(
+                    (f"{c}=?->{l}" if c in joker_cells else f"{c}={l}")
+                    for c, l in mv.placements
+                ) if mv.placements else "(pass)"
                 print(f"Selected: {ps}")
                 print(f"tile={mv.tile_points} word={mv.word_points} bonus={mv.bonus} total={mv.total} risk={mv.risk_penalty}")
                 if mv.completed_slots:
@@ -1299,7 +1306,11 @@ def main():
             print(f"Top {len(moves)} move(s) for {args.json_path}:")
             for i, mv in enumerate(moves, start=1):
                 if mv.placements:
-                    ps = ", ".join(f"{c}={l}" for c, l in mv.placements)
+                    joker_cells = set(mv.joker_cells)
+                    ps = ", ".join(
+                        (f"{c}=?->{l}" if c in joker_cells else f"{c}={l}")
+                        for c, l in mv.placements
+                    )
                 else:
                     ps = "(pass)"
                 print(f"{i}. {ps}")

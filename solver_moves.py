@@ -7,6 +7,12 @@ from typing import Dict, List, Tuple
 from solver_constraints import propagate_constraints
 from solver_model import cell_to_rc, rc_to_cell
 from solver_scoring import score_move
+from tile_rules import (
+    JOKER_TILE,
+    consume_rack_for_letters,
+    joker_cells_for_placements,
+    normalize_rack_items,
+)
 
 RISK_ONE_EMPTY = 5
 RISK_TWO_EMPTY = 2
@@ -15,6 +21,7 @@ RISK_TWO_EMPTY = 2
 @dataclass(frozen=True)
 class MoveSuggestion:
     placements: Tuple[Tuple[str, str], ...]
+    joker_cells: Tuple[str, ...]
     tile_points: int
     word_points: int
     bonus: int
@@ -24,12 +31,7 @@ class MoveSuggestion:
 
 
 def _normalize_rack(state: dict) -> List[str]:
-    rack = []
-    for x in state.get("rack", []):
-        s = str(x).strip().upper()
-        if len(s) == 1 and "A" <= s <= "Z":
-            rack.append(s)
-    return rack[:5]
+    return normalize_rack_items(state.get("rack", []))
 
 
 def _placement_key(placements: Tuple[Tuple[str, str], ...]) -> str:
@@ -75,39 +77,43 @@ def _post_move_rack(start_rack: List[str], placements: Tuple[Tuple[str, str], ..
 
 
 def _hypergeom_prob_at_least(pool: Counter, draws: int, needed: Counter) -> float:
-    req_letters = [ch for ch, n in needed.items() if n > 0]
+    req_letters = [ch for ch, n in needed.items() if n > 0 and ch != JOKER_TILE]
+    joker_pool = pool.get(JOKER_TILE, 0)
     need_total = sum(needed[ch] for ch in req_letters)
     pool_total = sum(pool.values())
     if need_total == 0:
         return 1.0
     if draws < need_total or pool_total < draws:
         return 0.0
-    for ch in req_letters:
-        if pool.get(ch, 0) < needed[ch]:
-            return 0.0
 
     total_ways = comb(pool_total, draws)
     if total_ways == 0:
         return 0.0
 
     req_pool_total = sum(pool[ch] for ch in req_letters)
-    other_pool = pool_total - req_pool_total
+    other_pool = pool_total - req_pool_total - joker_pool
     favorable = 0
 
-    # Enumerate draw counts for required letters with lower bounds.
-    alloc = [0] * len(req_letters)
+    # Enumerate draw counts for required letters and jokers.
+    alloc = [0] * (len(req_letters) + 1)
 
     def rec(i: int, used: int, ways_mul: int):
         nonlocal favorable
         if i == len(req_letters):
-            rem = draws - used
-            if 0 <= rem <= other_pool:
-                favorable += ways_mul * comb(other_pool, rem)
+            max_j = min(joker_pool, draws - used)
+            for j in range(max_j + 1):
+                rem = draws - used - j
+                if not (0 <= rem <= other_pool):
+                    continue
+                deficits = 0
+                for idx, ch in enumerate(req_letters):
+                    deficits += max(0, needed[ch] - alloc[idx])
+                if deficits <= j:
+                    favorable += ways_mul * comb(joker_pool, j) * comb(other_pool, rem)
             return
         ch = req_letters[i]
-        min_k = needed[ch]
         max_k = min(pool[ch], draws - used)
-        for k in range(min_k, max_k + 1):
+        for k in range(0, max_k + 1):
             alloc[i] = k
             rec(i + 1, used + k, ways_mul * comb(pool[ch], k))
 
@@ -129,6 +135,9 @@ def _opponent_draw_pool_counts(constraints, post_grid: List[List[str]], my_post_
             need[ch] = max(0, need[ch] - n)
             if need[ch] == 0:
                 need.pop(ch, None)
+    # Approximate single-joker game: if we don't currently hold joker, opponent draw pool may.
+    if JOKER_TILE not in my_counts:
+        need[JOKER_TILE] += 1
     return need
 
 
@@ -158,7 +167,8 @@ def _confidence_for_post_grid(constraints, post_grid: List[List[str]], state: di
 def _opponent_one_turn_ev(constraints, post_grid: List[List[str]], my_post_rack: List[str]) -> float:
     pool = _opponent_draw_pool_counts(constraints, post_grid, my_post_rack)
     pool_total = sum(pool.values())
-    draws = min(5, pool_total)
+    max_draw = 6 if pool.get(JOKER_TILE, 0) > 0 else 5
+    draws = min(max_draw, pool_total)
     if draws <= 0:
         return 0.0
 
@@ -208,22 +218,30 @@ def generate_forced_moves(state: dict, top: int = 10, sort_mode: str = "score") 
     constraints = propagate_constraints(state)
     rack = _normalize_rack(state)
     rack_counts = Counter(rack)
+    joker_count = rack_counts.get(JOKER_TILE, 0)
+    rack_letters = [ch for ch in rack if "A" <= ch <= "Z"]
+    rack_letter_counts = Counter(rack_letters)
 
     # Candidate empty cells where the exact forced letter is placeable from rack.
     by_letter: Dict[str, List[str]] = defaultdict(list)
     for (r, c), forced_letter in constraints.forced_letters.items():
         if constraints.model.grid[r][c] != ".":
             continue
-        if rack_counts[forced_letter] > 0:
+        if rack_letter_counts[forced_letter] > 0:
             by_letter[forced_letter].append(rc_to_cell(r, c))
     for ch in by_letter:
         by_letter[ch].sort()
+    forced_cell_letter: Dict[str, str] = {}
+    for (r, c), forced_letter in constraints.forced_letters.items():
+        if constraints.model.grid[r][c] == ".":
+            forced_cell_letter[rc_to_cell(r, c)] = forced_letter
+    all_forced_cells = sorted(forced_cell_letter.keys())
 
-    letters = sorted(rack_counts.keys())
+    letters = sorted(rack_letter_counts.keys())
     options_per_letter: List[List[Tuple[str, ...]]] = []
     for ch in letters:
         cells = by_letter.get(ch, [])
-        max_pick = min(rack_counts[ch], len(cells))
+        max_pick = min(rack_letter_counts[ch], len(cells))
         opts: List[Tuple[str, ...]] = []
         for k in range(max_pick + 1):
             opts.extend(combinations(cells, k))
@@ -231,11 +249,23 @@ def generate_forced_moves(state: dict, top: int = 10, sort_mode: str = "score") 
 
     suggestions: List[MoveSuggestion] = []
     seen = set()
-    if not letters:
-        score = score_move(state, {"placements": []})
+    def maybe_add_suggestion(place_t: Tuple[Tuple[str, str], ...]):
+        key = _placement_key(place_t)
+        if key in seen:
+            return
+        try:
+            consume_rack_for_letters(rack, [l for _, l in place_t], enforce_special_rules=True)
+        except ValueError:
+            return
+        seen.add(key)
+        score = score_move(
+            state,
+            {"placements": [{"cell": c, "letter": l} for c, l in place_t]},
+        )
         suggestions.append(
             MoveSuggestion(
                 placements=score.placements,
+                joker_cells=tuple(joker_cells_for_placements(rack, list(score.placements), enforce_special_rules=True)),
                 tile_points=score.tile_points,
                 word_points=score.word_points,
                 bonus=score.bonus,
@@ -244,33 +274,22 @@ def generate_forced_moves(state: dict, top: int = 10, sort_mode: str = "score") 
                 completed_slots=score.completed_slots,
             )
         )
-    else:
-        for picks in product(*options_per_letter):
-            placements: List[Tuple[str, str]] = []
-            for ch, picked_cells in zip(letters, picks):
-                for cell in picked_cells:
-                    placements.append((cell, ch))
-            placements.sort(key=lambda x: x[0])
-            place_t = tuple(placements)
-            key = _placement_key(place_t)
-            if key in seen:
-                continue
-            seen.add(key)
-            score = score_move(
-                state,
-                {"placements": [{"cell": c, "letter": l} for c, l in place_t]},
-            )
-            suggestions.append(
-                MoveSuggestion(
-                    placements=score.placements,
-                    tile_points=score.tile_points,
-                    word_points=score.word_points,
-                    bonus=score.bonus,
-                    total=score.total,
-                    risk_penalty=_blended_risk_penalty(state, constraints, rack, score.placements),
-                    completed_slots=score.completed_slots,
-                )
-            )
+
+    base_pick_products = product(*options_per_letter) if letters else [tuple()]
+    for picks in base_pick_products:
+        base_cells = set()
+        placements: List[Tuple[str, str]] = []
+        for ch, picked_cells in zip(letters, picks):
+            for cell in picked_cells:
+                base_cells.add(cell)
+                placements.append((cell, ch))
+        remaining_for_joker = [cell for cell in all_forced_cells if cell not in base_cells]
+        max_joker_pick = min(joker_count, len(remaining_for_joker))
+        for joker_k in range(max_joker_pick + 1):
+            for joker_cells in combinations(remaining_for_joker, joker_k):
+                merged = placements + [(cell, forced_cell_letter[cell]) for cell in joker_cells]
+                merged.sort(key=lambda x: x[0])
+                maybe_add_suggestion(tuple(merged))
 
     if sort_mode == "risk":
         suggestions.sort(

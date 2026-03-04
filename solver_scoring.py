@@ -1,8 +1,8 @@
-from collections import Counter
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
 from solver_model import build_board_model, cell_to_rc
+from tile_rules import consume_rack_for_letters, normalize_rack_items
 
 
 @dataclass(frozen=True)
@@ -16,12 +16,7 @@ class ScoreBreakdown:
 
 
 def _normalize_rack(state: dict) -> List[str]:
-    rack = []
-    for x in state.get("rack", []):
-        s = str(x).strip().upper()
-        if len(s) == 1 and "A" <= s <= "Z":
-            rack.append(s)
-    return rack[:5]
+    return normalize_rack_items(state.get("rack", []))
 
 
 def _normalize_placements(move: dict) -> List[Tuple[str, str]]:
@@ -51,12 +46,8 @@ def score_move(state: dict, move: dict) -> ScoreBreakdown:
     if len(placements) > len(rack):
         raise ValueError("placements exceed rack size")
 
-    # Enforce rack multiset availability.
-    rack_counts = Counter(rack)
-    place_counts = Counter(letter for _, letter in placements)
-    for ch, n in place_counts.items():
-        if rack_counts[ch] < n:
-            raise ValueError(f"placement uses unavailable rack letter: {ch}")
+    # Enforce rack/special-tile availability and special-tile round rules.
+    consume_rack_for_letters(rack, [letter for _, letter in placements], enforce_special_rules=True)
 
     # Validate placements and apply to a copy.
     post = [row[:] for row in model.grid]

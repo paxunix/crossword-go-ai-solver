@@ -22,6 +22,10 @@ Implemented:
 - Move scoring (`solver_scoring.py`).
 - Deterministic forced-letter move generation (`solver_moves.py`).
 - Suggest command and interactive selection UI (standalone + integrated).
+- Special tile framework:
+  - centralized rack/special-tile rules in `tile_rules.py`
+  - joker (`?`) wildcard support across editor/state/scoring/move generation
+  - mandatory joker play enforced when present in rack
 - Risk heuristic:
   - post-move penalties for leaving slots with 1 empty cell (high) or 2 empty cells (moderate)
   - blended with estimated opponent next-turn expected score using confidence weighting

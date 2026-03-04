@@ -9,6 +9,8 @@ Minimal repo invariants. Use this as a hard contract for solver/editor changes.
   - `B1..H1 = "#"`
   - `A2..A10 = "#"`
 - Allowed grid tokens are only: `X`, `#`, `.`, `A-Z`.
+- Rack tokens are `A-Z` plus special tile `?` (joker).
+- Rack capacity is 5 normally, or 6 when one tile is `?`.
 
 ## 2) Slot Semantics
 - Slots run only East (`E`) or South (`S`).
@@ -27,7 +29,8 @@ Minimal repo invariants. Use this as a hard contract for solver/editor changes.
 - Legal placements:
   - distinct target cells
   - only on `.` cells
-  - letters available from rack multiset
+  - letters available from rack multiset (with `?` wildcard support)
+  - if `?` is present in rack, move must consume it
 - Scoring:
   - `+1` per placed tile
   - word points only for slots that become complete this move

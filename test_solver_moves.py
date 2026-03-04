@@ -51,6 +51,51 @@ class SolverMovesTests(unittest.TestCase):
             sizes = [len(m.placements) for m in tied]
             self.assertEqual(sizes, sorted(sizes))
 
+    def test_generate_forced_moves_uses_joker_and_no_pass(self):
+        grid = make_initial_grid()
+        grid[2][3] = "#"  # D3 blocks A3:E to length 2 (B3,C3)
+        state = {
+            "rack": ["?"],
+            "grid": grid,
+            "clues": [
+                {"cell": "A3", "clues": [{"dir": "E", "text": "", "solution": "EV"}]},
+            ],
+        }
+        moves = generate_forced_moves(state, top=10)
+        placement_sets = [m.placements for m in moves]
+        self.assertNotIn(tuple(), placement_sets)
+        self.assertIn((("B3", "E"),), placement_sets)
+        self.assertIn((("C3", "V"),), placement_sets)
+
+    def test_generate_forced_moves_no_pass_when_joker_present_with_other_tiles(self):
+        grid = make_initial_grid()
+        grid[2][3] = "#"  # D3 blocks A3:E to length 2 (B3,C3)
+        state = {
+            "rack": ["?", "X", "Y"],
+            "grid": grid,
+            "clues": [
+                {"cell": "A3", "clues": [{"dir": "E", "text": "", "solution": "EV"}]},
+            ],
+        }
+        moves = generate_forced_moves(state, top=20)
+        placement_sets = [m.placements for m in moves]
+        self.assertNotIn(tuple(), placement_sets)
+
+    def test_generate_forced_moves_marks_joker_cell(self):
+        grid = make_initial_grid()
+        grid[2][3] = "#"  # D3 blocks A3:E to length 2 (B3,C3)
+        state = {
+            "rack": ["?"],
+            "grid": grid,
+            "clues": [
+                {"cell": "A3", "clues": [{"dir": "E", "text": "", "solution": "EV"}]},
+            ],
+        }
+        moves = generate_forced_moves(state, top=10)
+        by_place = {m.placements: m for m in moves}
+        self.assertEqual(by_place[(("B3", "E"),)].joker_cells, ("B3",))
+        self.assertEqual(by_place[(("C3", "V"),)].joker_cells, ("C3",))
+
 
 if __name__ == "__main__":
     unittest.main()

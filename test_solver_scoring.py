@@ -104,6 +104,18 @@ class SolverScoringTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "target empty"):
             score_move(state, {"placements": [{"cell": "B2", "letter": "B"}]})
 
+    def test_joker_can_satisfy_any_required_letter(self):
+        grid = make_initial_grid()
+        state = {"rack": ["?"], "grid": grid, "clues": []}
+        out = score_move(state, {"placements": [{"cell": "B2", "letter": "Z"}]})
+        self.assertEqual(out.tile_points, 1)
+
+    def test_joker_must_be_played_when_in_rack(self):
+        grid = make_initial_grid()
+        state = {"rack": ["?"], "grid": grid, "clues": []}
+        with self.assertRaisesRegex(ValueError, "must play special tile"):
+            score_move(state, {"placements": []})
+
 
 if __name__ == "__main__":
     unittest.main()
