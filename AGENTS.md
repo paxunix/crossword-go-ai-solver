@@ -295,6 +295,7 @@ Keyboard:
 - Tab: toggle Edit/Suggest mode
 - Ctrl-U: undo last committed suggested play (single-step)
 - *: toggle opponent-new marker for a letter cell
+- Ctrl-F: run clue constraint check (violations + inferred complete slots)
 - Ctrl-R: edit rack
 - Ctrl-W: save in-place (stay in editor)
 - Ctrl-O: output/dump and exit

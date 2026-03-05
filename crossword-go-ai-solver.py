@@ -8,6 +8,7 @@ import textwrap
 from typing import Dict, List, Set
 
 from solver_moves import generate_forced_moves
+from solver_model import build_board_model, rc_to_cell
 from tile_rules import consume_rack_for_letters, normalize_rack_items, normalize_rack_text
 
 ROWS = 10
@@ -17,6 +18,7 @@ COL_LABELS = "ABCDEFGH"
 CTRL_W = 23  # save
 CTRL_X = 24  # quit
 CTRL_R = 18  # rack edit
+CTRL_F = 6   # constraint check
 CTRL_U = 21  # undo last committed suggested play
 CTRL_O = 15  # output and exit
 TAB = 9
@@ -510,6 +512,87 @@ def parse_clue_entry(raw, fixed_dirs):
     return out
 
 
+def analyze_clue_constraints(grid, clue_map, rack, opponent_new_cells):
+    state = build_state_json(grid, clue_map, rack, opponent_new_cells)
+    model = build_board_model(state)
+
+    slot_item = {}
+    for cell, items in clue_map.items():
+        for it in items:
+            d = str(it.get("dir", "")).strip().upper()
+            if d in {"E", "S"}:
+                slot_item[f"{cell}:{d}"] = it
+
+    violations = []
+    assigned = {}
+
+    def candidate_word(item):
+        sol = str(item.get("solution", "")).strip().upper()
+        if sol and all("A" <= ch <= "Z" for ch in sol):
+            return sol, "solution"
+        if bool(item.get("unknown")):
+            hint = str(item.get("unknown_hint", "")).strip().upper()
+            if hint and all("A" <= ch <= "Z" for ch in hint):
+                return hint, "spec"
+        return "", ""
+
+    for slot in model.slots:
+        it = slot_item.get(slot.id)
+        if not it:
+            continue
+        word, kind = candidate_word(it)
+        if not word:
+            continue
+        if len(word) != slot.length:
+            violations.append(f"{slot.id} {kind} length {len(word)} != {slot.length}")
+            continue
+        for rc, ch in zip(slot.cells, word):
+            cell = rc_to_cell(*rc)
+            g = model.grid[rc[0]][rc[1]]
+            if "A" <= g <= "Z" and g != ch:
+                violations.append(f"{slot.id} {kind} conflicts grid at {cell}: {ch}!={g}")
+                continue
+            prev = assigned.get(rc)
+            if prev and prev[0] != ch:
+                violations.append(
+                    f"{slot.id} {kind} conflicts {prev[1]} at {cell}: {ch}!={prev[0]}"
+                )
+            else:
+                assigned[rc] = (ch, f"{slot.id} {kind}")
+
+    inferred = []
+    for slot in model.slots:
+        it = slot_item.get(slot.id)
+        has_solution = bool(str(it.get("solution", "")).strip()) if it else False
+        letters = []
+        complete = True
+        for rc in slot.cells:
+            g = model.grid[rc[0]][rc[1]]
+            if "A" <= g <= "Z":
+                letters.append(g)
+                continue
+            a = assigned.get(rc)
+            if a:
+                letters.append(a[0])
+            else:
+                complete = False
+                break
+        if not complete:
+            continue
+        word = "".join(letters)
+        if has_solution:
+            sol = str(it.get("solution", "")).strip().upper()
+            if sol != word:
+                violations.append(f"{slot.id} solution differs from inferred {word}")
+            continue
+        inferred.append(f"{slot.id} => {word}")
+
+    # De-dupe while preserving order.
+    violations = list(dict.fromkeys(violations))
+    inferred = list(dict.fromkeys(inferred))
+    return {"violations": violations, "inferred": inferred}
+
+
 # --------------------------------------------------
 # Editor
 # --------------------------------------------------
@@ -546,11 +629,12 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
     suggest_scroll = 0
     suggest_stale = True
     status_msg = ""
+    check_lines: List[str] = []
     undo_snapshot = None
 
     help_lines = [
         "ARROWS move | A-Z letter | 3/# clue | *=toggle opp marker | TAB suggest",
-        "ENTER: '.'->'#'+clue, '#' edit clue | clue text: use !=HINT | Ctrl-U undo | Ctrl-R rack | Ctrl-W save | Ctrl-O output | Ctrl-X quit"
+        "ENTER: '.'->'#'+clue, '#' edit clue | clue text: use !=HINT | Ctrl-F check | Ctrl-U undo | Ctrl-R rack | Ctrl-W save | Ctrl-O output | Ctrl-X quit"
     ]
 
     def snapshot_state():
@@ -881,6 +965,8 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
             else:
                 y = add_wrapped(y, "Clue: (none)")
             y = add_wrapped(y, f"Status: {status_msg}" if status_msg else "Status:")
+            for ln in check_lines:
+                y = add_wrapped(y, ln)
             y = draw_color_legend(stdscr, y)
 
             y += 1  # blank line
@@ -1023,6 +1109,28 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
 
         if ch == CTRL_R:
             edit_rack()
+            continue
+
+        if ch == CTRL_F:
+            report = analyze_clue_constraints(grid, clue_map, rack, opponent_new_cells)
+            v = report["violations"]
+            i = report["inferred"]
+            check_lines = []
+            if v:
+                check_lines.append(f"Check: {len(v)} violation(s).")
+                for ln in v[:3]:
+                    check_lines.append("  ! " + ln)
+                if len(v) > 3:
+                    check_lines.append(f"  ... {len(v)-3} more violation(s)")
+            else:
+                check_lines.append("Check: no constraint violations.")
+            if i:
+                check_lines.append(f"Inferred complete slot(s): {len(i)}")
+                for ln in i[:3]:
+                    check_lines.append("  + " + ln)
+                if len(i) > 3:
+                    check_lines.append(f"  ... {len(i)-3} more inferred")
+            status_msg = "Constraint check complete."
             continue
 
         if ch == TAB:

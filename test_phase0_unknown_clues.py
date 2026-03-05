@@ -184,6 +184,27 @@ class UnknownClueTests(unittest.TestCase):
         self.assertFalse(cw.clue_has_solution([{"dir": "E", "text": "x"}]))
         self.assertTrue(cw.clue_has_solution([{"dir": "E", "text": "x", "solution": "EV"}]))
 
+    def test_analyze_clue_constraints_reports_length_violation(self):
+        grid = cw.make_initial_grid()
+        clue_map = {"A2": [{"dir": "E", "text": "across", "solution": "AB"}]}
+        report = cw.analyze_clue_constraints(grid, clue_map, [], set())
+        self.assertTrue(any("A2:E" in v and "length" in v for v in report["violations"]))
+
+    def test_analyze_clue_constraints_reports_inferred_slot(self):
+        grid = cw.make_initial_grid()
+        clue_map = {
+            "A2": [{"dir": "E", "text": "across"}],
+            "B1": [{"dir": "S", "text": "d1", "solution": "AAAAAAAAA"}],
+            "C1": [{"dir": "S", "text": "d2", "solution": "BBBBBBBBB"}],
+            "D1": [{"dir": "S", "text": "d3", "solution": "CCCCCCCCC"}],
+            "E1": [{"dir": "S", "text": "d4", "solution": "DDDDDDDDD"}],
+            "F1": [{"dir": "S", "text": "d5", "solution": "EEEEEEEEE"}],
+            "G1": [{"dir": "S", "text": "d6", "solution": "FFFFFFFFF"}],
+            "H1": [{"dir": "S", "text": "d7", "solution": "GGGGGGGGG"}],
+        }
+        report = cw.analyze_clue_constraints(grid, clue_map, [], set())
+        self.assertIn("A2:E => ABCDEFG", report["inferred"])
+
 
 if __name__ == "__main__":
     unittest.main()
