@@ -561,6 +561,7 @@ def analyze_clue_constraints(grid, clue_map, rack, opponent_new_cells):
                 assigned[rc] = (ch, f"{slot.id} {kind}")
 
     inferred = []
+    overlay_letters = {}
     for slot in model.slots:
         it = slot_item.get(slot.id)
         has_solution = bool(str(it.get("solution", "")).strip()) if it else False
@@ -574,6 +575,7 @@ def analyze_clue_constraints(grid, clue_map, rack, opponent_new_cells):
             a = assigned.get(rc)
             if a:
                 letters.append(a[0])
+                overlay_letters[rc_to_cell(*rc)] = a[0]
             else:
                 complete = False
                 break
@@ -590,7 +592,7 @@ def analyze_clue_constraints(grid, clue_map, rack, opponent_new_cells):
     # De-dupe while preserving order.
     violations = list(dict.fromkeys(violations))
     inferred = list(dict.fromkeys(inferred))
-    return {"violations": violations, "inferred": inferred}
+    return {"violations": violations, "inferred": inferred, "overlay_letters": overlay_letters}
 
 
 # --------------------------------------------------
@@ -630,11 +632,13 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
     suggest_stale = True
     status_msg = ""
     check_lines: List[str] = []
+    check_mode = False
+    check_overlay_letters: Dict[str, str] = {}
     undo_snapshot = None
 
     help_lines = [
         "ARROWS move | A-Z letter | 3/# clue | *=toggle opp marker | TAB suggest",
-        "ENTER: '.'->'#'+clue, '#' edit clue | clue text: use !=HINT | Ctrl-F check | Ctrl-U undo | Ctrl-R rack | Ctrl-W save | Ctrl-O output | Ctrl-X quit"
+        "ENTER: '.'->'#'+clue, '#' edit clue | clue text: use !=HINT | Ctrl-F check toggle | Ctrl-U undo | Ctrl-R rack | Ctrl-W save | Ctrl-O output | Ctrl-X quit"
     ]
 
     def snapshot_state():
@@ -986,6 +990,8 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
             current = suggest_moves[map_display_idx_to_move_idx(suggest_sel)]
             move_cells = {cell for cell, _ in current.placements}
             move_letters = {cell: letter for cell, letter in current.placements}
+        elif mode == "edit" and check_mode:
+            move_letters = dict(check_overlay_letters)
         if mode == "suggest" and curses.has_colors():
             for cell in move_cells:
                 override_attrs[cell] = curses.color_pair(3)
@@ -1112,9 +1118,16 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
             continue
 
         if ch == CTRL_F:
+            if check_mode:
+                check_mode = False
+                check_lines = []
+                check_overlay_letters = {}
+                status_msg = "Constraint check overlay off."
+                continue
             report = analyze_clue_constraints(grid, clue_map, rack, opponent_new_cells)
             v = report["violations"]
             i = report["inferred"]
+            check_overlay_letters = report.get("overlay_letters", {})
             check_lines = []
             if v:
                 check_lines.append(f"Check: {len(v)} violation(s).")
@@ -1130,7 +1143,9 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
                     check_lines.append("  + " + ln)
                 if len(i) > 3:
                     check_lines.append(f"  ... {len(i)-3} more inferred")
-            status_msg = "Constraint check complete."
+            check_lines.append(f"Known-letter overlay cells: {len(check_overlay_letters)}")
+            check_mode = True
+            status_msg = "Constraint check overlay on."
             continue
 
         if ch == TAB:

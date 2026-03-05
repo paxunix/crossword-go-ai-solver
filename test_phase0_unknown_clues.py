@@ -204,6 +204,8 @@ class UnknownClueTests(unittest.TestCase):
         }
         report = cw.analyze_clue_constraints(grid, clue_map, [], set())
         self.assertIn("A2:E => ABCDEFG", report["inferred"])
+        self.assertEqual(report["overlay_letters"].get("B2"), "A")
+        self.assertEqual(report["overlay_letters"].get("H2"), "G")
 
 
 if __name__ == "__main__":
