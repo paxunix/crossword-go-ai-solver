@@ -35,7 +35,7 @@ Minimal repo invariants. Use this as a hard contract for solver/editor changes.
   - `+1` per placed tile
   - word points only for slots that become complete this move
   - word score uses full slot length
-  - `+5` bonus only when start rack size is 5 and exactly 5 tiles are placed
+  - `+5` bonus only when starting rack is full (`5` normal, `6` with `?`) and all rack tiles are placed
 
 ## 5) Determinism + Phase A Policy
 - Phase A suggestions must be non-speculative:

@@ -109,10 +109,10 @@ Game immediately validates:
 
 ### Bonus
 - +5 bonus if:
-  - player started turn with 5 tiles
-  - AND successfully placed all 5.
+  - player started turn with a full rack (`5` normally, `6` when joker is present)
+  - AND successfully placed all tiles from that rack.
 
-No bonus when rack < 5.
+No bonus when rack is not full.
 
 ---
 

@@ -72,6 +72,11 @@ def has_must_play_special_tile(rack: List[str]) -> bool:
     return False
 
 
+def full_rack_size_for_tiles(rack: List[str]) -> int:
+    tokens = normalize_rack_items(rack)
+    return MAX_RACK_SIZE_WITH_JOKER if JOKER_TILE in tokens else BASE_MAX_RACK_SIZE
+
+
 def consume_rack_for_letters(
     rack: List[str],
     placed_letters: List[str],

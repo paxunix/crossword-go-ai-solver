@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
 from solver_model import build_board_model, cell_to_rc
-from tile_rules import consume_rack_for_letters, normalize_rack_items
+from tile_rules import consume_rack_for_letters, full_rack_size_for_tiles, normalize_rack_items
 
 
 @dataclass(frozen=True)
@@ -77,7 +77,8 @@ def score_move(state: dict, move: dict) -> ScoreBreakdown:
     word_points = sum(
         slot.length for slot in model.slots if slot.id in set(completed_slots)
     )
-    bonus = 5 if len(rack) == 5 and len(placements) == 5 else 0
+    full_rack = full_rack_size_for_tiles(rack)
+    bonus = 5 if len(rack) == full_rack and len(placements) == len(rack) and len(rack) >= 5 else 0
     total = tile_points + word_points + bonus
 
     return ScoreBreakdown(

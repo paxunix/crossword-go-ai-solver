@@ -96,6 +96,29 @@ class SolverScoringTests(unittest.TestCase):
         self.assertEqual(out.bonus, 5)
         self.assertEqual(out.total, 10)
 
+    def test_bonus_applies_for_full_six_tile_rack_with_joker(self):
+        state = {
+            "rack": ["?", "A", "B", "C", "D", "E"],
+            "grid": make_initial_grid(),
+            "clues": [],
+        }
+        out = score_move(
+            state,
+            {
+                "placements": [
+                    {"cell": "B2", "letter": "Z"},
+                    {"cell": "C2", "letter": "A"},
+                    {"cell": "D2", "letter": "B"},
+                    {"cell": "E2", "letter": "C"},
+                    {"cell": "F2", "letter": "D"},
+                    {"cell": "G2", "letter": "E"},
+                ]
+            },
+        )
+        self.assertEqual(out.tile_points, 6)
+        self.assertEqual(out.bonus, 5)
+        self.assertEqual(out.total, 11)
+
     def test_invalid_placement_on_non_empty_cell(self):
         grid = make_initial_grid()
         r, c = cell_to_rc("B2")
