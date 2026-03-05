@@ -1150,6 +1150,8 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
                 check_overlay_letters = {}
                 status_msg = "Constraint check overlay off."
                 continue
+            if mode == "suggest":
+                mode = "edit"
             report = analyze_clue_constraints(grid, clue_map, rack, opponent_new_cells)
             v = report["violations"]
             i = report["inferred"]
@@ -1176,6 +1178,10 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
 
         if ch == TAB:
             if mode == "edit":
+                if check_mode:
+                    check_mode = False
+                    check_lines = []
+                    check_overlay_letters = {}
                 mode = "suggest"
                 if suggest_stale:
                     status_msg = "Working: computing suggestions..."
