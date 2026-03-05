@@ -5,6 +5,7 @@ import json
 import re
 import sys
 import textwrap
+import time
 from typing import Dict, List, Set
 
 from solver_moves import generate_forced_moves
@@ -674,7 +675,25 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
             suggest_stale = False
             return
         try:
-            suggest_moves = generate_forced_moves(current_state_json(), top=10, sort_mode=suggest_sort_mode)
+            started = time.monotonic()
+            last_paint = [started]
+
+            def progress(found_count: int):
+                now = time.monotonic()
+                # Avoid repainting too frequently while still showing live progress.
+                if now - last_paint[0] < 0.10:
+                    return
+                last_paint[0] = now
+                nonlocal status_msg
+                status_msg = f"Working: computing suggestions... found={found_count}"
+                draw()
+
+            suggest_moves = generate_forced_moves(
+                current_state_json(),
+                top=10,
+                sort_mode=suggest_sort_mode,
+                progress_cb=progress,
+            )
             suggest_sel = min(suggest_sel, max(0, len(suggest_moves) - 1))
             suggest_scroll = min(suggest_scroll, suggest_sel)
             order = "desc" if suggest_reverse else "asc"

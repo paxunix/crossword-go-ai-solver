@@ -2,7 +2,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from itertools import combinations, product
 from math import comb
-from typing import Dict, List, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from solver_constraints import propagate_constraints
 from solver_model import cell_to_rc, rc_to_cell
@@ -211,7 +211,12 @@ def _blended_risk_penalty(state: dict, constraints, start_rack: List[str], place
     return int(round(blended))
 
 
-def generate_forced_moves(state: dict, top: int = 10, sort_mode: str = "score") -> List[MoveSuggestion]:
+def generate_forced_moves(
+    state: dict,
+    top: int = 10,
+    sort_mode: str = "score",
+    progress_cb: Optional[Callable[[int], None]] = None,
+) -> List[MoveSuggestion]:
     sort_mode = str(sort_mode or "score").strip().lower()
     if sort_mode not in {"score", "risk"}:
         sort_mode = "score"
@@ -276,6 +281,8 @@ def generate_forced_moves(state: dict, top: int = 10, sort_mode: str = "score") 
                 completed_slots=score.completed_slots,
             )
         )
+        if progress_cb is not None:
+            progress_cb(len(suggestions))
 
     base_pick_products = product(*options_per_letter) if letters else [tuple()]
     for picks in base_pick_products:
