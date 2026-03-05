@@ -1137,6 +1137,8 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
             if mode == "edit":
                 mode = "suggest"
                 if suggest_stale:
+                    status_msg = "Working: computing suggestions..."
+                    draw()
                     recompute_suggestions()
             else:
                 mode = "edit"
