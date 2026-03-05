@@ -215,8 +215,10 @@ def generate_forced_moves(state: dict, top: int = 10, sort_mode: str = "score") 
     sort_mode = str(sort_mode or "score").strip().lower()
     if sort_mode not in {"score", "risk"}:
         sort_mode = "score"
-    constraints = propagate_constraints(state)
     rack = _normalize_rack(state)
+    if not rack:
+        return []
+    constraints = propagate_constraints(state)
     rack_counts = Counter(rack)
     joker_count = rack_counts.get(JOKER_TILE, 0)
     rack_letters = [ch for ch in rack if "A" <= ch <= "Z"]

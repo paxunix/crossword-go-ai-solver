@@ -666,6 +666,13 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
 
     def recompute_suggestions():
         nonlocal suggest_moves, suggest_sel, suggest_scroll, suggest_stale, status_msg
+        if not rack:
+            suggest_moves = []
+            suggest_sel = 0
+            suggest_scroll = 0
+            status_msg = "Rack empty; suggestions skipped."
+            suggest_stale = False
+            return
         try:
             suggest_moves = generate_forced_moves(current_state_json(), top=10, sort_mode=suggest_sort_mode)
             suggest_sel = min(suggest_sel, max(0, len(suggest_moves) - 1))
