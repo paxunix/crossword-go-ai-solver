@@ -8,7 +8,7 @@ import textwrap
 import time
 from typing import Dict, List, Set
 
-from solver_moves import generate_forced_moves
+from solver_moves import DEFAULT_PREDICTION_ENGINE, generate_forced_moves, prediction_engines
 from solver_model import build_board_model, cell_to_rc, rc_to_cell
 from tile_rules import consume_rack_for_letters, normalize_rack_items, normalize_rack_text
 
@@ -649,6 +649,8 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
     r, c = 1, 1
     mode = "edit"
     suggest_sort_mode = "score"
+    suggest_engine_names = list(prediction_engines())
+    suggest_engine_idx = suggest_engine_names.index(DEFAULT_PREDICTION_ENGINE) if DEFAULT_PREDICTION_ENGINE in suggest_engine_names else 0
     suggest_reverse = False
     suggest_moves = []
     suggest_sel = 0
@@ -715,12 +717,16 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
                 current_state_json(),
                 top=10,
                 sort_mode=suggest_sort_mode,
+                prediction_engine=suggest_engine_names[suggest_engine_idx],
                 progress_cb=progress,
             )
             suggest_sel = min(suggest_sel, max(0, len(suggest_moves) - 1))
             suggest_scroll = min(suggest_scroll, suggest_sel)
             order = "desc" if suggest_reverse else "asc"
-            status_msg = f"{len(suggest_moves)} suggestion(s) ready. sort={suggest_sort_mode} order={order}"
+            status_msg = (
+                f"{len(suggest_moves)} suggestion(s) ready. sort={suggest_sort_mode} "
+                f"pred={suggest_engine_names[suggest_engine_idx]} order={order}"
+            )
         except Exception as e:
             suggest_moves = []
             suggest_sel = 0
@@ -973,11 +979,14 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
         y = 0
 
         if mode == "suggest":
-            y = add_wrapped(y, "Suggest Mode: UP/DOWN select | ENTER apply | TAB back to edit | S toggle sort | ^ reverse | Ctrl-U undo last play")
+            y = add_wrapped(y, "Suggest Mode: UP/DOWN select | ENTER apply | TAB back to edit | S toggle sort | P cycle predictor | ^ reverse | Ctrl-U undo last play")
             y = add_wrapped(y, f"Status: {status_msg}" if status_msg else "Status:")
             rack_str = "".join(rack) if rack else "(empty)"
             order = "desc" if suggest_reverse else "asc"
-            y = add_wrapped(y, f"Rack: {rack_str} | Sort: {suggest_sort_mode} | Order: {order}")
+            y = add_wrapped(
+                y,
+                f"Rack: {rack_str} | Sort: {suggest_sort_mode} | Pred: {suggest_engine_names[suggest_engine_idx]} | Order: {order}",
+            )
 
             list_h = max(3, min(10, curses.LINES // 4))
             if suggest_sel < suggest_scroll:
@@ -1228,6 +1237,10 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
                 suggest_sort_mode = "risk" if suggest_sort_mode == "score" else "score"
                 recompute_suggestions()
                 continue
+            if ch in (ord("p"), ord("P")):
+                suggest_engine_idx = (suggest_engine_idx + 1) % len(suggest_engine_names)
+                recompute_suggestions()
+                continue
             if ch == ord("^"):
                 suggest_reverse = not suggest_reverse
                 order = "desc" if suggest_reverse else "asc"
@@ -1311,7 +1324,7 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
                     status_msg = f"Set {cell_label(r, c)} to {s}."
 
 
-def curses_suggest_viewer(stdscr, grid, clue_map, rack, opponent_new_cells, moves, sort_mode):
+def curses_suggest_viewer(stdscr, grid, clue_map, rack, opponent_new_cells, moves, sort_mode, prediction_engine):
     try:
         curses.set_escdelay(25)
     except Exception:
@@ -1350,7 +1363,11 @@ def curses_suggest_viewer(stdscr, grid, clue_map, rack, opponent_new_cells, move
 
         rack_str = "".join(rack) if rack else "(empty)"
         order = "desc" if reverse_order else "asc"
-        stdscr.addstr(y, 0, f"Rack: {rack_str} | Sort: {sort_mode} | Order: {order}"[:max(1, curses.COLS - 1)])
+        stdscr.addstr(
+            y,
+            0,
+            f"Rack: {rack_str} | Sort: {sort_mode} | Pred: {prediction_engine} | Order: {order}"[:max(1, curses.COLS - 1)],
+        )
         y += 1
 
         list_h = max(3, min(12, curses.LINES // 3))
@@ -1446,6 +1463,12 @@ def main():
     p_suggest.add_argument("json_path", help="Board state JSON file")
     p_suggest.add_argument("--top", type=int, default=10, help="Number of moves to show")
     p_suggest.add_argument("--sort", choices=["score", "risk"], default="score", help="Sort by score or risk")
+    p_suggest.add_argument(
+        "--prediction-engine",
+        choices=list(prediction_engines()),
+        default=DEFAULT_PREDICTION_ENGINE,
+        help="Risk prediction engine",
+    )
 
     # Backward compatibility: if first arg is not a subcommand, treat as legacy edit mode.
     argv = sys.argv[1:]
@@ -1456,14 +1479,19 @@ def main():
 
     if args.command == "suggest":
         state = load_state(args.json_path)
-        moves = generate_forced_moves(state, top=args.top, sort_mode=args.sort)
+        moves = generate_forced_moves(
+            state,
+            top=args.top,
+            sort_mode=args.sort,
+            prediction_engine=args.prediction_engine,
+        )
 
         # Interactive TUI when attached to a terminal; fallback to text otherwise.
         if sys.stdin.isatty() and sys.stdout.isatty():
             grid, clue_map, rack, opponent_new_cells = validate_and_normalize_state(state)
             selected = curses.wrapper(
                 lambda stdscr: curses_suggest_viewer(
-                    stdscr, grid, clue_map, rack, opponent_new_cells, moves, args.sort
+                    stdscr, grid, clue_map, rack, opponent_new_cells, moves, args.sort, args.prediction_engine
                 )
             )
             if selected is not None:

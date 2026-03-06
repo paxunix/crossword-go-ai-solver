@@ -16,6 +16,7 @@ from tile_rules import (
 
 RISK_ONE_EMPTY = 5
 RISK_TWO_EMPTY = 2
+DEFAULT_PREDICTION_ENGINE = "baseline"
 
 
 @dataclass(frozen=True)
@@ -164,6 +165,50 @@ def _confidence_for_post_grid(constraints, post_grid: List[List[str]], state: di
     return max(0.0, min(1.0, forced_ratio * history_factor))
 
 
+def _slot_clue_items(state: dict) -> Dict[str, dict]:
+    out: Dict[str, dict] = {}
+    for clue_entry in state.get("clues", []):
+        cell = str(clue_entry.get("cell", "")).strip().upper()
+        if not cell:
+            continue
+        for clue in clue_entry.get("clues", []):
+            direction = str(clue.get("dir", "")).strip().upper()
+            if direction not in {"E", "S"}:
+                continue
+            out[f"{cell}:{direction}"] = clue
+    return out
+
+
+def _speculative_cell_confidence(constraints, state: dict) -> Dict[Tuple[int, int], float]:
+    slot_items = _slot_clue_items(state)
+    out: Dict[Tuple[int, int], float] = {}
+    for slot in constraints.model.slots:
+        item = slot_items.get(slot.id)
+        if not item:
+            continue
+        if not bool(item.get("unknown")):
+            continue
+        hint = str(item.get("unknown_hint", "")).strip().upper()
+        if not hint or any(not ("A" <= ch <= "Z") for ch in hint):
+            continue
+        if len(hint) != slot.length:
+            continue
+        for rc in slot.cells:
+            if constraints.model.grid[rc[0]][rc[1]] == "." and rc not in constraints.forced_letters:
+                out[rc] = max(out.get(rc, 0.0), 0.70)
+    return out
+
+
+def _opponent_hold_factor(state: dict) -> float:
+    hist = state.get("opponent_new_cells")
+    if not isinstance(hist, list):
+        return 1.0
+    played = sum(1 for x in hist if isinstance(x, str) and x.strip())
+    played = max(0, min(5, played))
+    # Fewer observed tiles from last turn => stronger "holding for setup" prior.
+    return 1.0 + (5 - played) * 0.10
+
+
 def _opponent_one_turn_ev(constraints, post_grid: List[List[str]], my_post_rack: List[str]) -> float:
     pool = _opponent_draw_pool_counts(constraints, post_grid, my_post_rack)
     pool_total = sum(pool.values())
@@ -196,7 +241,41 @@ def _opponent_one_turn_ev(constraints, post_grid: List[List[str]], my_post_rack:
     return ev
 
 
-def _blended_risk_penalty(state: dict, constraints, start_rack: List[str], placements: Tuple[Tuple[str, str], ...]) -> int:
+def _opponent_one_turn_ev_enhanced(constraints, post_grid: List[List[str]], my_post_rack: List[str], state: dict) -> float:
+    base_ev = _opponent_one_turn_ev(constraints, post_grid, my_post_rack)
+    speculative = _speculative_cell_confidence(constraints, state)
+    hold_factor = _opponent_hold_factor(state)
+    extra_ev = 0.0
+
+    for slot in constraints.model.slots:
+        empties = []
+        for r, c in slot.cells:
+            if post_grid[r][c] == ".":
+                empties.append((r, c))
+        if not empties or len(empties) > 5:
+            continue
+        if all(rc in constraints.forced_letters for rc in empties):
+            continue
+
+        coverage = 0.0
+        for rc in empties:
+            if rc in constraints.forced_letters:
+                coverage += 1.0
+            elif rc in speculative:
+                coverage += speculative[rc]
+            else:
+                coverage += 0.20
+        p_complete = min(1.0, (coverage / len(empties)) * hold_factor * 0.55)
+        if p_complete <= 0.0:
+            continue
+        slot_value = slot.length + len(empties)
+        if len(empties) == 5:
+            slot_value += 5
+        extra_ev += p_complete * slot_value
+    return base_ev + extra_ev
+
+
+def _baseline_risk_penalty(state: dict, constraints, start_rack: List[str], placements: Tuple[Tuple[str, str], ...]) -> int:
     post_grid = [row[:] for row in constraints.model.grid]
     for cell, letter in placements:
         r, c = cell_to_rc(cell)
@@ -211,15 +290,47 @@ def _blended_risk_penalty(state: dict, constraints, start_rack: List[str], place
     return int(round(blended))
 
 
+def _enhanced_risk_penalty(state: dict, constraints, start_rack: List[str], placements: Tuple[Tuple[str, str], ...]) -> int:
+    post_grid = [row[:] for row in constraints.model.grid]
+    for cell, letter in placements:
+        r, c = cell_to_rc(cell)
+        post_grid[r][c] = letter
+
+    structural = _structural_risk_for_post_grid(constraints.model, placements)
+    my_post_rack = _post_move_rack(start_rack, placements)
+    baseline_opp_ev = _opponent_one_turn_ev(constraints, post_grid, my_post_rack)
+    opponent_ev = _opponent_one_turn_ev_enhanced(constraints, post_grid, my_post_rack, state)
+    confidence = _confidence_for_post_grid(constraints, post_grid, state)
+    base_blended = confidence * baseline_opp_ev + (1.0 - confidence) * structural
+    spec_delta = max(0.0, opponent_ev - baseline_opp_ev)
+    blended = base_blended + (0.75 * spec_delta * _opponent_hold_factor(state))
+    return int(round(blended))
+
+
+_PREDICTION_ENGINES = {
+    "baseline": _baseline_risk_penalty,
+    "enhanced": _enhanced_risk_penalty,
+}
+
+
+def prediction_engines() -> Tuple[str, ...]:
+    return tuple(_PREDICTION_ENGINES.keys())
+
+
 def generate_forced_moves(
     state: dict,
     top: int = 10,
     sort_mode: str = "score",
+    prediction_engine: str = DEFAULT_PREDICTION_ENGINE,
     progress_cb: Optional[Callable[[int], None]] = None,
 ) -> List[MoveSuggestion]:
     sort_mode = str(sort_mode or "score").strip().lower()
     if sort_mode not in {"score", "risk"}:
         sort_mode = "score"
+    engine_name = str(prediction_engine or DEFAULT_PREDICTION_ENGINE).strip().lower()
+    if engine_name not in _PREDICTION_ENGINES:
+        engine_name = DEFAULT_PREDICTION_ENGINE
+    risk_fn = _PREDICTION_ENGINES[engine_name]
     rack = _normalize_rack(state)
     if not rack:
         return []
@@ -277,7 +388,7 @@ def generate_forced_moves(
                 word_points=score.word_points,
                 bonus=score.bonus,
                 total=score.total,
-                risk_penalty=_blended_risk_penalty(state, constraints, rack, score.placements),
+                risk_penalty=risk_fn(state, constraints, rack, score.placements),
                 completed_slots=score.completed_slots,
             )
         )
