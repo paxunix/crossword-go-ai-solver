@@ -16,6 +16,13 @@ Minimal repo invariants. Use this as a hard contract for solver/editor changes.
 - Slots run only East (`E`) or South (`S`).
 - Slot starts adjacent to clue tile and ends at edge or next `#`.
 - Slot cells are interior playable cells only (`r>=1,c>=1`).
+- Clue direction is geometry-constrained:
+  - top row clue tiles (`B1..H1`) are `S` only
+  - left column clue tiles (`A2..A10`) are `E` only
+  - column `H` clue tiles are `S` only
+  - row `10` clue tiles are `E` only
+  - `H10` has no legal clue direction
+- Multi-clue tiles (`E` + `S`) are only valid in `B2..G9`.
 - Zero-length slots are invalid input (error).
 
 ## 3) Clue/Constraint Semantics

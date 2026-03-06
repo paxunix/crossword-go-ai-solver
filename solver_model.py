@@ -94,7 +94,14 @@ def _fixed_dirs_for_cell(r: int, c: int) -> Tuple[str, ...]:
         return ("S",)
     if c == 0 and r >= 1:
         return ("E",)
-    return ("E", "S")
+    if not is_interior(r, c):
+        return ()
+    dirs = []
+    if c < COLS - 1:
+        dirs.append("E")
+    if r < ROWS - 1:
+        dirs.append("S")
+    return tuple(dirs)
 
 
 def _extract_slot_cells(grid: List[List[str]], clue_r: int, clue_c: int, direction: str) -> Tuple[Tuple[int, int], ...]:
@@ -134,10 +141,14 @@ def build_board_model(state: dict) -> BoardModel:
             raise ValueError(f"clue cell must be '#': {clue_cell}")
 
         allowed_dirs = _fixed_dirs_for_cell(clue_r, clue_c)
+        seen_dirs = set()
         for clue in clue_entry.get("clues", []):
             direction = str(clue.get("dir", "")).strip().upper()
             if direction not in {"E", "S"}:
                 continue
+            if direction in seen_dirs:
+                raise ValueError(f"duplicate direction {direction} at {clue_cell}")
+            seen_dirs.add(direction)
             if direction not in allowed_dirs:
                 raise ValueError(f"direction {direction} not allowed at {clue_cell}")
 

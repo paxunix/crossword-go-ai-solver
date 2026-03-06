@@ -24,6 +24,11 @@ Use this when building `*.json` from screenshots so the process is deterministic
 - Interior `#` tiles may define one or two clues:
   - if right arrow shown, include `E`
   - if down arrow shown, include `S`
+- Geometry constraints for clue directions:
+  - Any clue tile in column `H` can only be `S`.
+  - Any clue tile in row `10` can only be `E`.
+  - `H10` cannot be a clue tile (no legal outgoing slot).
+  - Multi-clue (`E` + `S`) is only possible in `B2..G9`.
 - Split clues are always ordered `E` then `S`.
 
 ## 3. Clue Text and Placeholder Normalization

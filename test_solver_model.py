@@ -55,6 +55,48 @@ class SolverModelTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "zero-length slot"):
             build_board_model(state)
 
+    def test_column_h_clue_is_s_only(self):
+        grid = make_initial_grid()
+        grid[5][7] = "#"  # H6 interior edge clue tile
+        state = {
+            "grid": grid,
+            "clues": [{"cell": "H6", "clues": [{"dir": "E", "text": "invalid"}]}],
+        }
+        with self.assertRaisesRegex(ValueError, "not allowed"):
+            build_board_model(state)
+
+    def test_row_10_clue_is_e_only(self):
+        grid = make_initial_grid()
+        grid[9][2] = "#"  # C10 interior edge clue tile
+        state = {
+            "grid": grid,
+            "clues": [{"cell": "C10", "clues": [{"dir": "S", "text": "invalid"}]}],
+        }
+        with self.assertRaisesRegex(ValueError, "not allowed"):
+            build_board_model(state)
+
+    def test_h10_has_no_legal_direction(self):
+        grid = make_initial_grid()
+        grid[9][7] = "#"  # H10
+        state = {
+            "grid": grid,
+            "clues": [{"cell": "H10", "clues": [{"dir": "E", "text": "invalid"}]}],
+        }
+        with self.assertRaisesRegex(ValueError, "not allowed"):
+            build_board_model(state)
+
+    def test_duplicate_direction_rejected(self):
+        grid = make_initial_grid()
+        grid[1][1] = "#"  # B2
+        state = {
+            "grid": grid,
+            "clues": [
+                {"cell": "B2", "clues": [{"dir": "E", "text": "one"}, {"dir": "E", "text": "two"}]}
+            ],
+        }
+        with self.assertRaisesRegex(ValueError, "duplicate direction"):
+            build_board_model(state)
+
 
 if __name__ == "__main__":
     unittest.main()

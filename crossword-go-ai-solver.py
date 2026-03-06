@@ -9,7 +9,7 @@ import time
 from typing import Dict, List, Set
 
 from solver_moves import generate_forced_moves
-from solver_model import build_board_model, rc_to_cell
+from solver_model import build_board_model, cell_to_rc, rc_to_cell
 from tile_rules import consume_rack_for_letters, normalize_rack_items, normalize_rack_text
 
 ROWS = 10
@@ -52,7 +52,14 @@ def fixed_dirs_for_cell(r: int, c: int) -> List[str]:
         return ["S"]
     if c == 0 and r >= 1:
         return ["E"]
-    return []
+    if not is_interior(r, c):
+        return []
+    dirs = []
+    if c < COLS - 1:
+        dirs.append("E")
+    if r < ROWS - 1:
+        dirs.append("S")
+    return dirs
 
 def normalize_grid_token(tok: str) -> str:
     s = str(tok).strip().upper()
@@ -319,14 +326,20 @@ def validate_and_normalize_state(state):
     for r in range(1, ROWS):
         grid[r][0] = "#"
 
-    def normalize_clue_items(items):
+    def normalize_clue_items(items, allowed_dirs, cell):
         out = []
+        seen_dirs = set()
         for it in items:
             if not isinstance(it, dict):
                 continue
             d = str(it.get("dir", "")).strip().upper()
             if d not in {"E", "S"}:
                 continue
+            if d in seen_dirs:
+                raise ValueError(f"duplicate direction {d} at {cell}")
+            if d not in allowed_dirs:
+                raise ValueError(f"direction {d} not allowed at {cell}")
+            seen_dirs.add(d)
             t = str(it.get("text", ""))
             clue = {"dir": d, "text": t}
             sol = it.get("solution")
@@ -347,10 +360,20 @@ def validate_and_normalize_state(state):
 
     clue_map = {}
     for entry in state.get("clues", []):
+        if not isinstance(entry, dict):
+            continue
         cell = entry.get("cell")
         if not cell:
             continue
-        clue_map[str(cell).strip().upper()] = normalize_clue_items(entry.get("clues", []))
+        clue_cell = str(cell).strip().upper()
+        rr, cc = cell_to_rc(clue_cell)
+        if grid[rr][cc] != "#":
+            raise ValueError(f"clue cell must be '#': {clue_cell}")
+        clue_map[clue_cell] = normalize_clue_items(
+            entry.get("clues", []),
+            fixed_dirs_for_cell(rr, cc),
+            clue_cell,
+        )
 
     rack_raw = state.get("rack", [])
     rack = normalize_rack_items(rack_raw if isinstance(rack_raw, list) else [])

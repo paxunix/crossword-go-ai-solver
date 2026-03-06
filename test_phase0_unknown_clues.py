@@ -110,6 +110,30 @@ class UnknownClueTests(unittest.TestCase):
         _, clue_map, _, _ = cw.validate_and_normalize_state(state)
         self.assertTrue(clue_map["B1"][0]["unknown"])
 
+    def test_normalize_state_rejects_disallowed_direction_on_column_h(self):
+        grid = cw.make_initial_grid()
+        grid[5][7] = "#"  # H6
+        state = {
+            "grid": grid,
+            "rack": [],
+            "clues": [{"cell": "H6", "clues": [{"dir": "E", "text": "bad"}]}],
+        }
+        with self.assertRaisesRegex(ValueError, "not allowed"):
+            cw.validate_and_normalize_state(state)
+
+    def test_normalize_state_rejects_duplicate_clue_directions(self):
+        grid = cw.make_initial_grid()
+        grid[1][1] = "#"  # B2
+        state = {
+            "grid": grid,
+            "rack": [],
+            "clues": [
+                {"cell": "B2", "clues": [{"dir": "S", "text": "one"}, {"dir": "S", "text": "two"}]}
+            ],
+        }
+        with self.assertRaisesRegex(ValueError, "duplicate direction"):
+            cw.validate_and_normalize_state(state)
+
     def test_opponent_new_cells_roundtrip(self):
         grid = cw.make_initial_grid()
         grid[2][2] = "V"  # C3
