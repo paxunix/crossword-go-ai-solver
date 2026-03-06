@@ -122,6 +122,25 @@ class SolverMovesTests(unittest.TestCase):
         self.assertIn((("C3", "V"),), e_map)
         self.assertNotEqual(b_map[(("C3", "V"),)], e_map[(("C3", "V"),)])
 
+    def test_enhanced_prediction_engine_differs_on_fully_known_early_board(self):
+        grid = make_initial_grid()
+        state = {
+            "rack": ["B", "C", "X", "Y", "Z"],
+            "grid": grid,
+            "clues": [
+                {"cell": "A2", "clues": [{"dir": "E", "text": "", "solution": "BCDEFGH"}]},
+                {"cell": "B1", "clues": [{"dir": "S", "text": "", "solution": "BCDEFGHIJ"}]},
+            ],
+        }
+        baseline = generate_forced_moves(state, top=20, sort_mode="score", prediction_engine="baseline")
+        enhanced = generate_forced_moves(state, top=20, sort_mode="score", prediction_engine="enhanced")
+        b_map = {m.placements: m.risk_penalty for m in baseline}
+        e_map = {m.placements: m.risk_penalty for m in enhanced}
+        target = (("B2", "B"),)
+        self.assertIn(target, b_map)
+        self.assertIn(target, e_map)
+        self.assertNotEqual(b_map[target], e_map[target])
+
 
 if __name__ == "__main__":
     unittest.main()

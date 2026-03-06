@@ -243,6 +243,12 @@ def _opponent_one_turn_ev(constraints, post_grid: List[List[str]], my_post_rack:
 
 def _opponent_one_turn_ev_enhanced(constraints, post_grid: List[List[str]], my_post_rack: List[str], state: dict) -> float:
     base_ev = _opponent_one_turn_ev(constraints, post_grid, my_post_rack)
+    pool = _opponent_draw_pool_counts(constraints, post_grid, my_post_rack)
+    pool_total = sum(pool.values())
+    max_draw = 6 if pool.get(JOKER_TILE, 0) > 0 else 5
+    draws = min(max_draw, pool_total)
+    if draws <= 0 or pool_total <= 0:
+        return base_ev
     speculative = _speculative_cell_confidence(constraints, state)
     hold_factor = _opponent_hold_factor(state)
     extra_ev = 0.0
@@ -272,7 +278,42 @@ def _opponent_one_turn_ev_enhanced(constraints, post_grid: List[List[str]], my_p
         if len(empties) == 5:
             slot_value += 5
         extra_ev += p_complete * slot_value
-    return base_ev + extra_ev
+
+    # Also model non-completing pressure from available letter pool.
+    # This keeps enhanced distinct on early fully-known boards where immediate
+    # completion EV is near zero but setup potential is still meaningful.
+    pressure = 0.0
+    for slot in constraints.model.slots:
+        empties = []
+        for r, c in slot.cells:
+            if post_grid[r][c] == ".":
+                empties.append((r, c))
+        if not empties:
+            continue
+        if any(rc not in constraints.forced_letters for rc in empties):
+            continue
+
+        need = Counter(constraints.forced_letters[rc] for rc in empties)
+        expected_hits = 0.0
+        for ch, n in need.items():
+            # Expected draws of each needed letter (capped by demand).
+            expected_ch = draws * (pool.get(ch, 0) / pool_total)
+            expected_hits += min(float(n), expected_ch)
+        expected_jokers = draws * (pool.get(JOKER_TILE, 0) / pool_total)
+        placeable = min(float(draws), float(len(empties)), expected_hits + expected_jokers)
+        if placeable <= 0.0:
+            continue
+
+        # Value is mostly tile pressure, with additional weight for leaving
+        # near-complete high-value slots.
+        remain_after = max(0.0, float(len(empties)) - placeable)
+        near_bonus = 0.0
+        if remain_after <= 1.0:
+            near_bonus = slot.length * 0.60
+        elif remain_after <= 2.0:
+            near_bonus = slot.length * 0.30
+        pressure += (placeable * 0.80) + near_bonus
+    return base_ev + extra_ev + (pressure * 0.35 * hold_factor)
 
 
 def _baseline_risk_penalty(state: dict, constraints, start_rack: List[str], placements: Tuple[Tuple[str, str], ...]) -> int:
