@@ -1,0 +1,397 @@
+{
+  "size": {
+    "cols": 8,
+    "rows": 10
+  },
+  "rack": [
+    "T",
+    "R",
+    "V",
+    "S",
+    "V"
+  ],
+  "grid": [
+    [
+      "X",
+      "#",
+      "#",
+      "#",
+      "#",
+      "#",
+      "#",
+      "#"
+    ],
+    [
+      "#",
+      "O",
+      "B",
+      ".",
+      "C",
+      "U",
+      "R",
+      "E"
+    ],
+    [
+      "#",
+      "V",
+      "I",
+      "T",
+      "A",
+      "#",
+      "E",
+      "."
+    ],
+    [
+      "#",
+      "E",
+      "#",
+      "A",
+      "M",
+      "P",
+      "L",
+      "E"
+    ],
+    [
+      "#",
+      "R",
+      "I",
+      "T",
+      "E",
+      "#",
+      "I",
+      "C"
+    ],
+    [
+      "#",
+      "T",
+      ".",
+      "#",
+      "L",
+      "T",
+      ".",
+      "#"
+    ],
+    [
+      "#",
+      "H",
+      "P",
+      "A",
+      "#",
+      "E",
+      ".",
+      "K"
+    ],
+    [
+      "#",
+      ".",
+      "A",
+      ".",
+      ".",
+      "N",
+      "#",
+      "I"
+    ],
+    [
+      "#",
+      "O",
+      "I",
+      "#",
+      "S",
+      "E",
+      "A",
+      "L"
+    ],
+    [
+      "#",
+      "W",
+      "R",
+      ".",
+      "T",
+      ".",
+      "E",
+      "N"
+    ]
+  ],
+  "clues": [
+    {
+      "cell": "B1",
+      "clues": [
+        {
+          "dir": "S",
+          "text": "TAKE DOWN",
+          "solution": "OVERTHROW"
+        }
+      ]
+    },
+    {
+      "cell": "C1",
+      "clues": [
+        {
+          "dir": "S",
+          "text": "BISMUTH",
+          "solution": "BI"
+        }
+      ]
+    },
+    {
+      "cell": "D1",
+      "clues": [
+        {
+          "dir": "S",
+          "text": "ASAP",
+          "solution": "STAT"
+        }
+      ]
+    },
+    {
+      "cell": "E1",
+      "clues": [
+        {
+          "dir": "S",
+          "text": "",
+          "solution": "CAMEL"
+        }
+      ]
+    },
+    {
+      "cell": "F1",
+      "clues": [
+        {
+          "dir": "S",
+          "text": "",
+          "solution": "U"
+        }
+      ]
+    },
+    {
+      "cell": "G1",
+      "clues": [
+        {
+          "dir": "S",
+          "text": "EXPERIENCE AGAIN",
+          "solution": "RELIVE"
+        }
+      ]
+    },
+    {
+      "cell": "H1",
+      "clues": [
+        {
+          "dir": "S",
+          "text": "CORPORAte VIP",
+          "solution": "EXEC"
+        }
+      ]
+    },
+    {
+      "cell": "A2",
+      "clues": [
+        {
+          "dir": "E",
+          "text": "VAGUE",
+          "solution": "OBSCURE"
+        }
+      ]
+    },
+    {
+      "cell": "A3",
+      "clues": [
+        {
+          "dir": "E",
+          "text": "LA DOLCE _",
+          "solution": "VITA"
+        }
+      ]
+    },
+    {
+      "cell": "F3",
+      "clues": [
+        {
+          "dir": "E",
+          "text": "FED__",
+          "solution": "EX"
+        },
+        {
+          "dir": "S",
+          "text": "PRESSURE",
+          "solution": "P"
+        }
+      ]
+    },
+    {
+      "cell": "A4",
+      "clues": [
+        {
+          "dir": "E",
+          "text": "EVERYONE",
+          "solution": "E"
+        }
+      ]
+    },
+    {
+      "cell": "C4",
+      "clues": [
+        {
+          "dir": "E",
+          "text": "PLENTY",
+          "solution": "AMPLE"
+        },
+        {
+          "dir": "S",
+          "text": "weaken",
+          "solution": "IMPAIR"
+        }
+      ]
+    },
+    {
+      "cell": "A5",
+      "clues": [
+        {
+          "dir": "E",
+          "text": "_ OF PASSAGE",
+          "solution": "RITE"
+        }
+      ]
+    },
+    {
+      "cell": "F5",
+      "clues": [
+        {
+          "dir": "E",
+          "text": "ICE CREAM",
+          "solution": "IC"
+        },
+        {
+          "dir": "S",
+          "text": "CREED",
+          "solution": "TENET"
+        }
+      ]
+    },
+    {
+      "cell": "A6",
+      "clues": [
+        {
+          "dir": "E",
+          "text": "TRADEMARK",
+          "solution": "TM"
+        }
+      ]
+    },
+    {
+      "cell": "D6",
+      "clues": [
+        {
+          "dir": "E",
+          "text": "LOAN TO VALUE",
+          "solution": "LTV"
+        },
+        {
+          "dir": "S",
+          "text": "AUDIO-VIDEO",
+          "solution": "AV"
+        }
+      ]
+    },
+    {
+      "cell": "H6",
+      "clues": [
+        {
+          "dir": "S",
+          "text": "",
+          "solution": "KILN"
+        }
+      ]
+    },
+    {
+      "cell": "A7",
+      "clues": [
+        {
+          "dir": "E",
+          "text": "TOOT_STE",
+          "solution": "HPA"
+        }
+      ]
+    },
+    {
+      "cell": "E7",
+      "clues": [
+        {
+          "dir": "E",
+          "text": "A MOUSE!",
+          "solution": "EEK"
+        },
+        {
+          "dir": "S",
+          "text": "ASB__OS",
+          "solution": "EST"
+        }
+      ]
+    },
+    {
+      "cell": "A8",
+      "clues": [
+        {
+          "dir": "E",
+          "text": "RAVEN (picture)",
+          "solution": "RAVEN"
+        }
+      ]
+    },
+    {
+      "cell": "G8",
+      "clues": [
+        {
+          "dir": "E",
+          "text": "internet",
+          "solution": "I"
+        },
+        {
+          "dir": "S",
+          "text": "anything else",
+          "solution": "AE"
+        }
+      ]
+    },
+    {
+      "cell": "A9",
+      "clues": [
+        {
+          "dir": "E",
+          "text": "C_N",
+          "solution": "OI"
+        }
+      ]
+    },
+    {
+      "cell": "D9",
+      "clues": [
+        {
+          "dir": "E",
+          "text": "MAKE AIRTIGHT",
+          "solution": "SEAL"
+        },
+        {
+          "dir": "S",
+          "text": "ITALIC",
+          "solution": "I"
+        }
+      ]
+    },
+    {
+      "cell": "A10",
+      "clues": [
+        {
+          "dir": "E",
+          "text": "NOT ORAL",
+          "solution": "WRITTEN"
+        }
+      ]
+    }
+  ],
+  "opponent_new_cells": [
+    "G2",
+    "F7",
+    "C10"
+  ]
+}

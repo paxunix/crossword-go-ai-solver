@@ -15,6 +15,18 @@ Current state is deterministic play prediction based entirely on scoring
 model and available letters and board state.  Useful mostly to offload board
 state memory from the player into a file.
 
+Screenshot to JSON
+==================
+
+Use the helper script to run Codex extraction on a screenshot:
+
+```
+./screenshot2json.zsh /path/to/board.png
+```
+
+This writes `<image-basename>.json` into the repo root using
+`SCREENSHOT_EXTRACTION_RULES.md` as the extraction policy.
+
 Future
 ======
 
