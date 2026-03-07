@@ -55,7 +55,13 @@ When clue content is pictorial:
 Candidate selection policy:
 
 - Use board-constrained slot length + direction first.
-- Prefer the highest-confidence candidate that fits slot geometry.
+- Prefer the highest-confidence candidate that fits slot geometry.  Do this
+  for picture clues as well as partial clues as well as word/phrase clues.
+- Frequent solution types:
+    - one, two, or three letter solutions are usually (but not always) the
+      acronym of the words of the clue.
+    - be careful with this, since sometimes a clue could have multiple
+      meanings even for a single letter clue (e.g. SELF => I, not SELF => S)
 - If uncertain, still provide best candidate and keep it speculative (`unknown`).
 - If no viable candidate is found, use generic text and leave `unknown_hint`
   descriptive (example: `"unknown_hint": "bird silhouette"`).

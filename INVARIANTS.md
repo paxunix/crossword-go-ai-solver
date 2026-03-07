@@ -29,6 +29,7 @@ Minimal repo invariants. Use this as a hard contract for solver/editor changes.
 - `solution` is knowledge, not placed state.
 - If `solution` exists, its length must match slot length.
 - Contradicting constraints must raise errors (no silent conflict resolution).
+- Duplicate clue directions in the same clue cell are invalid.
 - Unknown clue marker is directional and uses `!=...` form.
 - A single clue direction cannot be both unknown and solved (`unknown + solution` is invalid).
 
@@ -51,10 +52,18 @@ Minimal repo invariants. Use this as a hard contract for solver/editor changes.
 - Keep legality, score, and risk as separate concepts.
 - Risk may blend structural heuristics with opponent expected-value estimates,
   but must remain deterministic for identical input state.
+- Prediction engines are selectable (`baseline`, `enhanced`).
+- Enhanced risk may consume optional explicit opponent-pool metadata:
+  - `opponent_pool_counts`, `opponent_pool`, `opponent_draw_count`.
 
-## 6) Separation of Concerns
+## 6) Editor Session Behavior
+- Undo (`Ctrl-U`) is in-session history (multi-step), not persisted in JSON.
+- In check mode, inferred complete slots are selectable and can be applied to
+  clue `solution` values via `Enter`.
+
+## 7) Separation of Concerns
 - Core game/solver logic stays out of curses UI.
 - JSON state is the integration contract between editor and solver modules.
 
-## 7) Validation Gate
+## 8) Validation Gate
 - Any change to solver behavior (model, constraints, scoring, move generation) must keep the regression test suite passing.

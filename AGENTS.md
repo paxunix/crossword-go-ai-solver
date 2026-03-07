@@ -236,6 +236,21 @@ This is metadata only (not a grid token).
 
 ---
 
+### opponent_pool_counts / opponent_pool / opponent_draw_count
+
+Optional metadata for enhanced risk prediction:
+- `opponent_pool_counts`: map of remaining opponent-pool tile counts.
+  - example: `{"V":2,"E":1,"?":0}`
+- `opponent_pool`: tile list alternative to `opponent_pool_counts`.
+  - example: `["V","V","E"]`
+- `opponent_draw_count`: clamp draws for opponent EV model.
+
+Notes:
+- These fields are optional and only used by enhanced prediction heuristics.
+- They are in-session modeling metadata, not grid tokens.
+
+---
+
 ## Meaning of `solution`
 
 - Optional.
@@ -293,7 +308,7 @@ Keyboard:
   - "." → "#" + clue entry
   - "#" → edit clue
 - Tab: toggle Edit/Suggest mode
-- Ctrl-U: undo last committed suggested play (single-step)
+- Ctrl-U: undo last committed change (multi-step in-session history)
 - *: toggle opponent-new marker for a letter cell
 - Ctrl-F: run clue constraint check (violations + inferred complete slots)
 - Ctrl-R: edit rack
@@ -303,8 +318,15 @@ Keyboard:
 
 Suggest mode:
 - Shows top deterministic move options and live board preview.
+- `S` toggles sort mode (`score` / `risk`).
+- `P` cycles prediction engines (`baseline` / `enhanced`).
 - Enter commits selected move in-session (updates grid + rack).
 - Committing a suggested move clears `opponent_new_cells`.
+
+Check mode (`Ctrl-F`):
+- Shows violations + inferred complete slots.
+- Inferred slots are cursor-selectable (`UP/DOWN`).
+- `Enter` on selected inferred slot writes/overwrites that clue-direction `solution`.
 
 Header displays:
 
@@ -367,6 +389,8 @@ Risk model policy:
   - estimated opponent next-turn expected score (`opponent_EV`)
 - Blend weight is confidence-driven from current board knowledge
   (forced-letter coverage + opponent metadata quality).
+- Enhanced engine additionally models non-completing opponent pressure from
+  remaining letter pool, and may use explicit opponent pool metadata when given.
 - On highly solved boards, `opponent_EV` should dominate.
 
 ---
