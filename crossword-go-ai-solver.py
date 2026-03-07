@@ -584,7 +584,7 @@ def analyze_clue_constraints(grid, clue_map, rack, opponent_new_cells):
             else:
                 assigned[rc] = (ch, f"{slot.id} {kind}")
 
-    inferred = []
+    inferred_slots = []
     overlay_letters = {}
     for slot in model.slots:
         it = slot_item.get(slot.id)
@@ -611,12 +611,25 @@ def analyze_clue_constraints(grid, clue_map, rack, opponent_new_cells):
             if sol != word:
                 violations.append(f"{slot.id} solution differs from inferred {word}")
             continue
-        inferred.append(f"{slot.id} => {word}")
+        inferred_slots.append({"slot": slot.id, "word": word})
 
     # De-dupe while preserving order.
     violations = list(dict.fromkeys(violations))
-    inferred = list(dict.fromkeys(inferred))
-    return {"violations": violations, "inferred": inferred, "overlay_letters": overlay_letters}
+    seen = set()
+    dedup_inferred_slots = []
+    for it in inferred_slots:
+        key = (it.get("slot"), it.get("word"))
+        if key in seen:
+            continue
+        seen.add(key)
+        dedup_inferred_slots.append(it)
+    inferred = [f"{it['slot']} => {it['word']}" for it in dedup_inferred_slots]
+    return {
+        "violations": violations,
+        "inferred": inferred,
+        "inferred_slots": dedup_inferred_slots,
+        "overlay_letters": overlay_letters,
+    }
 
 
 # --------------------------------------------------
@@ -660,6 +673,9 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
     check_lines: List[str] = []
     check_mode = False
     check_overlay_letters: Dict[str, str] = {}
+    check_inferred_slots: List[Dict[str, str]] = []
+    check_inferred_sel = 0
+    check_inferred_scroll = 0
     undo_history = []
 
     help_lines = [
@@ -978,7 +994,7 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
         return "".join(buf).strip()
 
     def draw():
-        nonlocal suggest_scroll
+        nonlocal suggest_scroll, check_inferred_scroll
         stdscr.erase()
         y = 0
 
@@ -1033,6 +1049,22 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
             y = add_wrapped(y, f"Status: {status_msg}" if status_msg else "Status:")
             for ln in check_lines:
                 y = add_wrapped(y, ln)
+            if check_mode and check_inferred_slots:
+                y = add_wrapped(y, "Inferred slots: UP/DOWN select, ENTER apply as solution")
+                list_h = max(2, min(6, curses.LINES // 6))
+                if check_inferred_sel < check_inferred_scroll:
+                    check_inferred_scroll = check_inferred_sel
+                if check_inferred_sel >= check_inferred_scroll + list_h:
+                    check_inferred_scroll = check_inferred_sel - list_h + 1
+                for i in range(list_h):
+                    idx = check_inferred_scroll + i
+                    if idx >= len(check_inferred_slots) or y >= curses.LINES:
+                        break
+                    it = check_inferred_slots[idx]
+                    line = f"{idx+1:>2}. {it['slot']} => {it['word']}"
+                    attr = curses.color_pair(2) if (idx == check_inferred_sel and curses.has_colors()) else (curses.A_REVERSE if idx == check_inferred_sel else 0)
+                    stdscr.addstr(y, 0, line[:max(1, curses.COLS - 1)], attr)
+                    y += 1
             y = draw_color_legend(stdscr, y)
 
             y += 1  # blank line
@@ -1092,6 +1124,59 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
         suggest_stale = True
         status_msg = "Rack updated."
         push_undo_if_changed(before_snap, before_fp)
+
+    def refresh_check_overlay():
+        nonlocal check_lines, check_mode, check_overlay_letters, check_inferred_slots, check_inferred_sel, check_inferred_scroll, status_msg
+        report = analyze_clue_constraints(grid, clue_map, rack, opponent_new_cells)
+        v = report["violations"]
+        i = report["inferred"]
+        check_overlay_letters = report.get("overlay_letters", {})
+        check_inferred_slots = list(report.get("inferred_slots", []))
+        check_inferred_sel = min(check_inferred_sel, max(0, len(check_inferred_slots) - 1))
+        check_inferred_scroll = min(check_inferred_scroll, check_inferred_sel)
+        check_lines = []
+        if v:
+            check_lines.append(f"Check: {len(v)} violation(s).")
+            for ln in v[:3]:
+                check_lines.append("  ! " + ln)
+            if len(v) > 3:
+                check_lines.append(f"  ... {len(v)-3} more violation(s)")
+        else:
+            check_lines.append("Check: no constraint violations.")
+        if i:
+            check_lines.append(f"Inferred complete slot(s): {len(i)}")
+        check_lines.append(f"Known-letter overlay cells: {len(check_overlay_letters)}")
+        check_mode = True
+        status_msg = "Constraint check overlay on."
+
+    def apply_selected_inferred_solution():
+        nonlocal clue_map, suggest_stale, status_msg
+        if not check_inferred_slots:
+            status_msg = "No inferred slots to apply."
+            return
+        it = check_inferred_slots[check_inferred_sel]
+        slot_id = str(it.get("slot", "")).strip().upper()
+        word = str(it.get("word", "")).strip().upper()
+        if ":" not in slot_id or not word:
+            status_msg = "Invalid inferred slot."
+            return
+        clue_cell, direction = slot_id.split(":", 1)
+        if direction not in {"E", "S"}:
+            status_msg = "Invalid inferred direction."
+            return
+        items = list(clue_map.get(clue_cell, []))
+        found = False
+        for ci in items:
+            if str(ci.get("dir", "")).strip().upper() == direction:
+                ci["solution"] = word
+                found = True
+                break
+        if not found:
+            items.append({"dir": direction, "text": "", "solution": word})
+        items.sort(key=lambda x: 0 if str(x.get("dir", "")).strip().upper() == "E" else 1)
+        clue_map[clue_cell] = items
+        suggest_stale = True
+        status_msg = f"Applied inferred solution: {slot_id}={word}"
 
     def enter_clue(pre_change=None):
         nonlocal grid, suggest_stale, status_msg
@@ -1194,32 +1279,14 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
                 check_mode = False
                 check_lines = []
                 check_overlay_letters = {}
+                check_inferred_slots = []
+                check_inferred_sel = 0
+                check_inferred_scroll = 0
                 status_msg = "Constraint check overlay off."
                 continue
             if mode == "suggest":
                 mode = "edit"
-            report = analyze_clue_constraints(grid, clue_map, rack, opponent_new_cells)
-            v = report["violations"]
-            i = report["inferred"]
-            check_overlay_letters = report.get("overlay_letters", {})
-            check_lines = []
-            if v:
-                check_lines.append(f"Check: {len(v)} violation(s).")
-                for ln in v[:3]:
-                    check_lines.append("  ! " + ln)
-                if len(v) > 3:
-                    check_lines.append(f"  ... {len(v)-3} more violation(s)")
-            else:
-                check_lines.append("Check: no constraint violations.")
-            if i:
-                check_lines.append(f"Inferred complete slot(s): {len(i)}")
-                for ln in i[:3]:
-                    check_lines.append("  + " + ln)
-                if len(i) > 3:
-                    check_lines.append(f"  ... {len(i)-3} more inferred")
-            check_lines.append(f"Known-letter overlay cells: {len(check_overlay_letters)}")
-            check_mode = True
-            status_msg = "Constraint check overlay on."
+            refresh_check_overlay()
             continue
 
         if ch == TAB:
@@ -1228,6 +1295,9 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
                     check_mode = False
                     check_lines = []
                     check_overlay_letters = {}
+                    check_inferred_slots = []
+                    check_inferred_sel = 0
+                    check_inferred_scroll = 0
                 mode = "suggest"
                 if suggest_stale:
                     status_msg = "Working: computing suggestions..."
@@ -1285,6 +1355,21 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
                     status_msg = f"Apply failed: {e}"
                 continue
             continue
+
+        if mode == "edit" and check_mode and check_inferred_slots:
+            if ch == curses.KEY_UP:
+                check_inferred_sel = max(0, check_inferred_sel - 1)
+                continue
+            if ch == curses.KEY_DOWN:
+                check_inferred_sel = min(max(0, len(check_inferred_slots) - 1), check_inferred_sel + 1)
+                continue
+            if ch in (10, 13, curses.KEY_ENTER):
+                before_snap = snapshot_state()
+                before_fp = state_fingerprint()
+                apply_selected_inferred_solution()
+                refresh_check_overlay()
+                push_undo_if_changed(before_snap, before_fp)
+                continue
 
         if ch == curses.KEY_UP:
             r = max(0, r-1); continue
