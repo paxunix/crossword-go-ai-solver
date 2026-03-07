@@ -231,6 +231,33 @@ class UnknownClueTests(unittest.TestCase):
         self.assertEqual(report["overlay_letters"].get("B2"), "A")
         self.assertEqual(report["overlay_letters"].get("H2"), "G")
 
+    def test_apply_inferred_solution_replaces_spec_entry(self):
+        clue_map = {
+            "A2": [
+                {"dir": "E", "text": "bird pic", "unknown": True, "unknown_hint": "RAVEN"},
+                {"dir": "S", "text": "down clue"},
+            ]
+        }
+        cw.apply_inferred_solution_to_clue_map(clue_map, "A2:E", "RAVEN")
+        self.assertEqual(
+            clue_map["A2"],
+            [
+                {"dir": "E", "text": "bird pic", "solution": "RAVEN"},
+                {"dir": "S", "text": "down clue"},
+            ],
+        )
+
+    def test_apply_inferred_solution_creates_direction_when_missing(self):
+        clue_map = {"D6": [{"dir": "S", "text": "south clue"}]}
+        cw.apply_inferred_solution_to_clue_map(clue_map, "D6:E", "ABC")
+        self.assertEqual(
+            clue_map["D6"],
+            [
+                {"dir": "E", "text": "", "solution": "ABC"},
+                {"dir": "S", "text": "south clue"},
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

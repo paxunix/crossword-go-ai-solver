@@ -632,6 +632,33 @@ def analyze_clue_constraints(grid, clue_map, rack, opponent_new_cells):
     }
 
 
+def apply_inferred_solution_to_clue_map(clue_map: Dict[str, List[dict]], slot_id: str, word: str) -> None:
+    sid = str(slot_id).strip().upper()
+    inferred_word = str(word).strip().upper()
+    if ":" not in sid:
+        raise ValueError("invalid slot id")
+    clue_cell, direction = sid.split(":", 1)
+    if direction not in {"E", "S"}:
+        raise ValueError("invalid slot direction")
+    if not inferred_word or any(not ("A" <= ch <= "Z") for ch in inferred_word):
+        raise ValueError("invalid inferred solution word")
+
+    existing_items = list(clue_map.get(clue_cell, []))
+    preserved_text = ""
+    kept_items = []
+    for item in existing_items:
+        d = str(item.get("dir", "")).strip().upper()
+        if d == direction:
+            preserved_text = str(item.get("text", ""))
+            continue
+        kept_items.append(item)
+
+    # Replace the directional clue entry entirely (drop unknown/spec fields).
+    kept_items.append({"dir": direction, "text": preserved_text, "solution": inferred_word})
+    kept_items.sort(key=lambda x: 0 if str(x.get("dir", "")).strip().upper() == "E" else 1)
+    clue_map[clue_cell] = kept_items
+
+
 # --------------------------------------------------
 # Editor
 # --------------------------------------------------
@@ -1150,31 +1177,14 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
         status_msg = "Constraint check overlay on."
 
     def apply_selected_inferred_solution():
-        nonlocal clue_map, suggest_stale, status_msg
+        nonlocal suggest_stale, status_msg
         if not check_inferred_slots:
             status_msg = "No inferred slots to apply."
             return
         it = check_inferred_slots[check_inferred_sel]
         slot_id = str(it.get("slot", "")).strip().upper()
         word = str(it.get("word", "")).strip().upper()
-        if ":" not in slot_id or not word:
-            status_msg = "Invalid inferred slot."
-            return
-        clue_cell, direction = slot_id.split(":", 1)
-        if direction not in {"E", "S"}:
-            status_msg = "Invalid inferred direction."
-            return
-        items = list(clue_map.get(clue_cell, []))
-        found = False
-        for ci in items:
-            if str(ci.get("dir", "")).strip().upper() == direction:
-                ci["solution"] = word
-                found = True
-                break
-        if not found:
-            items.append({"dir": direction, "text": "", "solution": word})
-        items.sort(key=lambda x: 0 if str(x.get("dir", "")).strip().upper() == "E" else 1)
-        clue_map[clue_cell] = items
+        apply_inferred_solution_to_clue_map(clue_map, slot_id, word)
         suggest_stale = True
         status_msg = f"Applied inferred solution: {slot_id}={word}"
 
@@ -1366,7 +1376,11 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
             if ch in (10, 13, curses.KEY_ENTER):
                 before_snap = snapshot_state()
                 before_fp = state_fingerprint()
-                apply_selected_inferred_solution()
+                try:
+                    apply_selected_inferred_solution()
+                except Exception as e:
+                    status_msg = f"Apply inferred failed: {e}"
+                    continue
                 refresh_check_overlay()
                 push_undo_if_changed(before_snap, before_fp)
                 continue
