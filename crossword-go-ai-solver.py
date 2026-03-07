@@ -1077,7 +1077,10 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
             for ln in check_lines:
                 y = add_wrapped(y, ln)
             if check_mode and check_inferred_slots:
-                y = add_wrapped(y, "Inferred slots: UP/DOWN select, ENTER apply as solution")
+                y = add_wrapped(y, "Inferred slots: UP/DOWN select, ENTER apply as solution (selected preview on board)")
+                clue_line = selected_inferred_clue_text()
+                if clue_line:
+                    y = add_wrapped(y, clue_line)
                 list_h = max(2, min(6, curses.LINES // 6))
                 if check_inferred_sel < check_inferred_scroll:
                     check_inferred_scroll = check_inferred_sel
@@ -1113,6 +1116,11 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
             move_letters = {cell: letter for cell, letter in current.placements}
         elif mode == "edit" and check_mode:
             move_letters = dict(check_overlay_letters)
+            preview_letters = selected_inferred_preview_letters()
+            move_letters.update(preview_letters)
+            if curses.has_colors():
+                for cell in preview_letters:
+                    override_attrs[cell] = curses.color_pair(3)
         if mode == "suggest" and curses.has_colors():
             for cell in move_cells:
                 override_attrs[cell] = curses.color_pair(3)
@@ -1187,6 +1195,41 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
         apply_inferred_solution_to_clue_map(clue_map, slot_id, word)
         suggest_stale = True
         status_msg = f"Applied inferred solution: {slot_id}={word}"
+
+    def selected_inferred_preview_letters() -> Dict[str, str]:
+        if not (mode == "edit" and check_mode and check_inferred_slots):
+            return {}
+        it = check_inferred_slots[check_inferred_sel]
+        slot_id = str(it.get("slot", "")).strip().upper()
+        word = str(it.get("word", "")).strip().upper()
+        if not slot_id or not word:
+            return {}
+        try:
+            model = build_board_model(current_state_json())
+        except Exception:
+            return {}
+        slot = next((s for s in model.slots if s.id == slot_id), None)
+        if slot is None or len(word) != slot.length or any(not ("A" <= ch <= "Z") for ch in word):
+            return {}
+        out = {}
+        for rc, ch in zip(slot.cells, word):
+            out[rc_to_cell(*rc)] = ch
+        return out
+
+    def selected_inferred_clue_text() -> str:
+        if not (mode == "edit" and check_mode and check_inferred_slots):
+            return ""
+        it = check_inferred_slots[check_inferred_sel]
+        slot_id = str(it.get("slot", "")).strip().upper()
+        if ":" not in slot_id:
+            return ""
+        clue_cell, direction = slot_id.split(":", 1)
+        if direction not in {"E", "S"}:
+            return ""
+        items = clue_map.get(clue_cell, [])
+        item = next((x for x in items if str(x.get("dir", "")).strip().upper() == direction), None)
+        text = str(item.get("text", "")).strip() if item else ""
+        return f"{slot_id} clue: {text or '(empty)'}"
 
     def enter_clue(pre_change=None):
         nonlocal grid, suggest_stale, status_msg
@@ -1297,6 +1340,16 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
             if mode == "suggest":
                 mode = "edit"
             refresh_check_overlay()
+            continue
+
+        if mode == "edit" and check_mode and ch == 27:
+            check_mode = False
+            check_lines = []
+            check_overlay_letters = {}
+            check_inferred_slots = []
+            check_inferred_sel = 0
+            check_inferred_scroll = 0
+            status_msg = "Constraint check overlay off."
             continue
 
         if ch == TAB:
