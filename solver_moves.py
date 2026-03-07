@@ -123,6 +123,62 @@ def _hypergeom_prob_at_least(pool: Counter, draws: int, needed: Counter) -> floa
 
 
 def _opponent_draw_pool_counts(constraints, post_grid: List[List[str]], my_post_rack: List[str]) -> Counter:
+    return _opponent_draw_pool_counts_with_state(
+        constraints,
+        post_grid,
+        my_post_rack,
+        state=None,
+        include_synthetic_joker=True,
+    )
+
+
+def _explicit_opponent_pool_from_state(state: Optional[dict]) -> Optional[Counter]:
+    if not isinstance(state, dict):
+        return None
+    counts_raw = state.get("opponent_pool_counts")
+    if isinstance(counts_raw, dict):
+        out = Counter()
+        for k, v in counts_raw.items():
+            tok = str(k).strip().upper()
+            if tok != JOKER_TILE and (len(tok) != 1 or not ("A" <= tok <= "Z")):
+                continue
+            try:
+                n = int(v)
+            except Exception:
+                continue
+            if n > 0:
+                out[tok] += n
+        return out
+    tiles_raw = state.get("opponent_pool")
+    if isinstance(tiles_raw, list):
+        toks = normalize_rack_items(tiles_raw)
+        return Counter(toks)
+    return None
+
+
+def _opponent_draw_count(pool: Counter, state: Optional[dict]) -> int:
+    if isinstance(state, dict):
+        raw = state.get("opponent_draw_count")
+        if raw is not None:
+            try:
+                n = int(raw)
+            except Exception:
+                n = 0
+            return max(0, min(n, sum(pool.values())))
+    max_draw = 6 if pool.get(JOKER_TILE, 0) > 0 else 5
+    return min(max_draw, sum(pool.values()))
+
+
+def _opponent_draw_pool_counts_with_state(
+    constraints,
+    post_grid: List[List[str]],
+    my_post_rack: List[str],
+    state: Optional[dict],
+    include_synthetic_joker: bool,
+) -> Counter:
+    explicit = _explicit_opponent_pool_from_state(state)
+    if explicit is not None:
+        return explicit
     # Approximate remaining draw pool as forced letters still unfilled after our move,
     # minus the letters currently known in our rack.
     need = Counter()
@@ -137,7 +193,7 @@ def _opponent_draw_pool_counts(constraints, post_grid: List[List[str]], my_post_
             if need[ch] == 0:
                 need.pop(ch, None)
     # Approximate single-joker game: if we don't currently hold joker, opponent draw pool may.
-    if JOKER_TILE not in my_counts:
+    if include_synthetic_joker and JOKER_TILE not in my_counts:
         need[JOKER_TILE] += 1
     return need
 
@@ -210,10 +266,15 @@ def _opponent_hold_factor(state: dict) -> float:
 
 
 def _opponent_one_turn_ev(constraints, post_grid: List[List[str]], my_post_rack: List[str]) -> float:
-    pool = _opponent_draw_pool_counts(constraints, post_grid, my_post_rack)
+    pool = _opponent_draw_pool_counts_with_state(
+        constraints,
+        post_grid,
+        my_post_rack,
+        state=None,
+        include_synthetic_joker=True,
+    )
     pool_total = sum(pool.values())
-    max_draw = 6 if pool.get(JOKER_TILE, 0) > 0 else 5
-    draws = min(max_draw, pool_total)
+    draws = _opponent_draw_count(pool, None)
     if draws <= 0:
         return 0.0
 
@@ -242,11 +303,16 @@ def _opponent_one_turn_ev(constraints, post_grid: List[List[str]], my_post_rack:
 
 
 def _opponent_one_turn_ev_enhanced(constraints, post_grid: List[List[str]], my_post_rack: List[str], state: dict) -> float:
-    base_ev = _opponent_one_turn_ev(constraints, post_grid, my_post_rack)
-    pool = _opponent_draw_pool_counts(constraints, post_grid, my_post_rack)
+    pool = _opponent_draw_pool_counts_with_state(
+        constraints,
+        post_grid,
+        my_post_rack,
+        state=state,
+        include_synthetic_joker=False,
+    )
+    base_ev = _opponent_one_turn_ev_from_pool(constraints, post_grid, pool, _opponent_draw_count(pool, state))
     pool_total = sum(pool.values())
-    max_draw = 6 if pool.get(JOKER_TILE, 0) > 0 else 5
-    draws = min(max_draw, pool_total)
+    draws = _opponent_draw_count(pool, state)
     if draws <= 0 or pool_total <= 0:
         return base_ev
     speculative = _speculative_cell_confidence(constraints, state)
@@ -314,6 +380,29 @@ def _opponent_one_turn_ev_enhanced(constraints, post_grid: List[List[str]], my_p
             near_bonus = slot.length * 0.30
         pressure += (placeable * 0.80) + near_bonus
     return base_ev + extra_ev + (pressure * 0.35 * hold_factor)
+
+
+def _opponent_one_turn_ev_from_pool(constraints, post_grid: List[List[str]], pool: Counter, draws: int) -> float:
+    ev = 0.0
+    for slot in constraints.model.slots:
+        empties = []
+        for r, c in slot.cells:
+            if post_grid[r][c] == ".":
+                empties.append((r, c))
+        if not empties or len(empties) > 5:
+            continue
+        if any(rc not in constraints.forced_letters for rc in empties):
+            continue
+
+        need = Counter(constraints.forced_letters[rc] for rc in empties)
+        p_complete = _hypergeom_prob_at_least(pool, draws, need)
+        if p_complete <= 0.0:
+            continue
+        slot_value = slot.length + len(empties)
+        if len(empties) == 5:
+            slot_value += 5
+        ev += p_complete * slot_value
+    return ev
 
 
 def _baseline_risk_penalty(state: dict, constraints, start_rack: List[str], placements: Tuple[Tuple[str, str], ...]) -> int:

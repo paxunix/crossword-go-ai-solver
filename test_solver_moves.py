@@ -141,6 +141,40 @@ class SolverMovesTests(unittest.TestCase):
         self.assertIn(target, e_map)
         self.assertNotEqual(b_map[target], e_map[target])
 
+    def test_enhanced_prediction_respects_explicit_opponent_pool_counts(self):
+        grid = make_initial_grid()
+        state_base = {
+            "rack": ["A"],
+            "grid": grid,
+            "clues": [
+                {"cell": "A2", "clues": [{"dir": "E", "text": "", "solution": "VVVVVVV"}]},
+                {"cell": "B1", "clues": [{"dir": "S", "text": "", "solution": "VVVVVVVVV"}]},
+            ],
+            "opponent_draw_count": 5,
+        }
+        state_v_pool = dict(state_base)
+        state_v_pool["opponent_pool_counts"] = {"V": 5}
+        state_no_v_pool = dict(state_base)
+        state_no_v_pool["opponent_pool_counts"] = {"E": 5}
+
+        moves_v = generate_forced_moves(
+            state_v_pool,
+            top=10,
+            sort_mode="score",
+            prediction_engine="enhanced",
+        )
+        moves_no_v = generate_forced_moves(
+            state_no_v_pool,
+            top=10,
+            sort_mode="score",
+            prediction_engine="enhanced",
+        )
+        risk_v = {m.placements: m.risk_penalty for m in moves_v}
+        risk_no_v = {m.placements: m.risk_penalty for m in moves_no_v}
+        self.assertIn(tuple(), risk_v)
+        self.assertIn(tuple(), risk_no_v)
+        self.assertGreater(risk_v[tuple()], risk_no_v[tuple()])
+
 
 if __name__ == "__main__":
     unittest.main()
