@@ -660,11 +660,11 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
     check_lines: List[str] = []
     check_mode = False
     check_overlay_letters: Dict[str, str] = {}
-    undo_snapshot = None
+    undo_history = []
 
     help_lines = [
         "ARROWS move | A-Z letter | 3/# clue | *=toggle opp marker | TAB suggest",
-        "ENTER: '.'->'#'+clue, '#' edit clue | clue text: use !=HINT | Ctrl-F check toggle | Ctrl-U undo | Ctrl-R rack | Ctrl-W save | Ctrl-O output | Ctrl-X quit"
+        "ENTER: '.'->'#'+clue, '#' edit clue | clue text: use !=HINT | Ctrl-F check toggle | Ctrl-U undo last change | Ctrl-R rack | Ctrl-W save | Ctrl-O output | Ctrl-X quit"
     ]
 
     def snapshot_state():
@@ -741,6 +741,10 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
 
     def state_fingerprint():
         return json.dumps(build_state_json(grid, clue_map, rack, opponent_new_cells), sort_keys=True)
+
+    def push_undo_if_changed(before_snap, before_fp):
+        if state_fingerprint() != before_fp:
+            undo_history.append(before_snap)
 
     initial_fp = state_fingerprint()
 
@@ -979,7 +983,7 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
         y = 0
 
         if mode == "suggest":
-            y = add_wrapped(y, "Suggest Mode: UP/DOWN select | ENTER apply | TAB back to edit | S toggle sort | P cycle predictor | ^ reverse | Ctrl-U undo last play")
+            y = add_wrapped(y, "Suggest Mode: UP/DOWN select | ENTER apply | TAB back to edit | S toggle sort | P cycle predictor | ^ reverse | Ctrl-U undo last change")
             y = add_wrapped(y, f"Status: {status_msg}" if status_msg else "Status:")
             rack_str = "".join(rack) if rack else "(empty)"
             order = "desc" if suggest_reverse else "asc"
@@ -1082,12 +1086,20 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
         line = prompt_line("Enter rack tiles (A-Z and ? for joker), max 5 (or 6 with ?): ")
         if not line:
             return
+        before_snap = snapshot_state()
+        before_fp = state_fingerprint()
         rack = normalize_rack(line)
         suggest_stale = True
         status_msg = "Rack updated."
+        push_undo_if_changed(before_snap, before_fp)
 
-    def enter_clue():
+    def enter_clue(pre_change=None):
         nonlocal grid, suggest_stale, status_msg
+        if pre_change is None:
+            before_snap = snapshot_state()
+            before_fp = state_fingerprint()
+        else:
+            before_snap, before_fp = pre_change
         token = grid[r][c]
         if token not in (".", "#"):
             return
@@ -1137,6 +1149,7 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
             initial_text=existing,
         )
         if not line:
+            push_undo_if_changed(before_snap, before_fp)
             return
 
         try:
@@ -1145,6 +1158,7 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
             status_msg = f"Clue updated at {cell}."
         except Exception:
             pass
+        push_undo_if_changed(before_snap, before_fp)
 
     while True:
         draw()
@@ -1224,12 +1238,11 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
             continue
 
         if ch == CTRL_U:
-            if undo_snapshot is not None:
-                restore_snapshot(undo_snapshot)
-                undo_snapshot = None
-                status_msg = "Undid last committed play."
+            if undo_history:
+                restore_snapshot(undo_history.pop())
+                status_msg = "Undid last committed change."
             else:
-                status_msg = "No committed play to undo."
+                status_msg = "No committed change to undo."
             continue
 
         if mode == "suggest":
@@ -1259,13 +1272,15 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
                     status_msg = "No suggestions available."
                     continue
                 mv = suggest_moves[map_display_idx_to_move_idx(suggest_sel)]
-                undo_snapshot = snapshot_state()
+                before_snap = snapshot_state()
+                before_fp = state_fingerprint()
                 try:
                     updated = apply_placements_to_state(current_state_json(), mv.placements)
                     grid, clue_map, rack, opponent_new_cells = validate_and_normalize_state(updated)
                     mode = "edit"
                     suggest_stale = True
                     status_msg = f"Applied move with total={mv.total}. Press Ctrl-U to undo."
+                    push_undo_if_changed(before_snap, before_fp)
                 except Exception as e:
                     status_msg = f"Apply failed: {e}"
                 continue
@@ -1286,20 +1301,25 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
 
         if ch == ord(' ') or ch in (127, 8, curses.KEY_BACKSPACE):
             if is_interior(r, c):
+                before_snap = snapshot_state()
+                before_fp = state_fingerprint()
                 grid[r][c] = "."
                 clue_map.pop(cell_label(r, c), None)
                 opponent_new_cells.discard(cell_label(r, c))
                 suggest_stale = True
                 status_msg = f"Cleared {cell_label(r, c)}."
+                push_undo_if_changed(before_snap, before_fp)
             continue
 
         if 32 <= ch <= 126:
             s = chr(ch).upper()
             if s in {"3", "#"}:
                 if is_interior(r, c):
+                    before_snap = snapshot_state()
+                    before_fp = state_fingerprint()
                     grid[r][c] = "#"
                     opponent_new_cells.discard(cell_label(r, c))
-                    enter_clue()
+                    enter_clue(pre_change=(before_snap, before_fp))
                     suggest_stale = True
                 elif grid[r][c] == "#":
                     enter_clue()
@@ -1307,14 +1327,19 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
                 if is_interior(r, c):
                     cell = cell_label(r, c)
                     if "A" <= grid[r][c] <= "Z":
+                        before_snap = snapshot_state()
+                        before_fp = state_fingerprint()
                         if cell in opponent_new_cells:
                             opponent_new_cells.remove(cell)
                         else:
                             opponent_new_cells.add(cell)
                         suggest_stale = True
                         status_msg = f"Toggled opponent marker at {cell}."
+                        push_undo_if_changed(before_snap, before_fp)
             elif s in {".", "#"} or ("A" <= s <= "Z"):
                 if is_interior(r, c):
+                    before_snap = snapshot_state()
+                    before_fp = state_fingerprint()
                     grid[r][c] = s
                     if s != "#":
                         clue_map.pop(cell_label(r, c), None)
@@ -1322,6 +1347,7 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
                         opponent_new_cells.discard(cell_label(r, c))
                     suggest_stale = True
                     status_msg = f"Set {cell_label(r, c)} to {s}."
+                    push_undo_if_changed(before_snap, before_fp)
 
 
 def curses_suggest_viewer(stdscr, grid, clue_map, rack, opponent_new_cells, moves, sort_mode, prediction_engine):
