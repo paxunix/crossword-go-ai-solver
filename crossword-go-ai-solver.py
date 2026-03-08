@@ -1150,7 +1150,11 @@ def curses_editor(stdscr, grid, clue_map, rack, opponent_new_cells, save_path=No
 
     def edit_rack():
         nonlocal rack, suggest_stale, status_msg
-        line = prompt_line("Enter rack tiles (A-Z and ? for joker), max 5 (or 6 with ?): ")
+        existing = "".join(rack)
+        line = prompt_line(
+            "Enter rack tiles (A-Z and ? for joker), max 5 (or 6 with ?): ",
+            initial_text=existing,
+        )
         if not line:
             return
         before_snap = snapshot_state()
